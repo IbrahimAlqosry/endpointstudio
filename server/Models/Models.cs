@@ -176,12 +176,14 @@ public record GenerateProjectRequest(
     string Location,
     EndpointStyle Style,
     List<TableSelection> Tables,
-    bool IncludeApiDocs);
+    bool IncludeApiDocs,
+    bool CleanArchitecture = true,
+    bool Jwt = true);
 
 public record TableSelection(string Schema, string Name, List<string> Operations);
 
 public record TargetOption(string Tfm, int Major, string Label, string Support, bool CanBuild, bool CanRun, bool Recommended);
 
-public record GenerateProjectResult(string ProjectPath, List<string> CreatedFiles, BuildResult? Build);
+public record GenerateProjectResult(string ProjectPath, List<string> CreatedFiles, BuildResult? Build, string? SolutionPath = null, string? AdminUser = null, string? AdminPassword = null);
 
 public class StudioException(string message) : Exception(message);

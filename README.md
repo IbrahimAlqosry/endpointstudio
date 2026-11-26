@@ -1,6 +1,6 @@
 # Stackwright
 
-A visual, no-code studio for **.NET Web APIs**, from **.NET Framework 4.x (ASP.NET Web API 2)** through **.NET Core** to **.NET 11**. Open any .NET project to browse, add, edit and delete its endpoints, or turn a SQL Server or MySQL database into a ready-to-run API in a few clicks. Users only ever see forms, lists and buttons. They never see code.
+A visual, no-code studio for **.NET Web APIs** (from **.NET Framework 4.x** to **.NET 11**), the **Angular, React, Next.js and Vue** apps that call them, and the **databases** behind them. Open any project to browse, add, edit and delete its endpoints, turn a database into a ready-to-run Clean Architecture API with JWT sign-in, design and edit databases visually, and manage the code with Git. Users only ever see forms, lists and buttons.
 
 ## Features
 
@@ -17,7 +17,10 @@ A visual, no-code studio for **.NET Web APIs**, from **.NET Framework 4.x (ASP.N
 | **Build check** | Compiles the project and lists any problems in plain language |
 | **Run & try** | Starts the API on a free port, and a **Try it** panel sends real requests and explains the status codes |
 | **Export** | Downloads a Postman collection (v2.1) of every endpoint, with sample request bodies |
-| **New from database** | A four-step wizard: connect (**SQL Server, PostgreSQL, MySQL, Oracle or SQLite**) → pick a database or schema → pick tables and operations → settings. It generates entities, a `DbContext`, CRUD endpoints (Controllers or Minimal APIs) and optional interactive API docs, then runs a build check |
+| **New from database** | A four-step wizard: connect (**SQL Server, PostgreSQL, MySQL, Oracle or SQLite**) → pick a database or schema → pick tables and operations → settings. By default it generates a **Clean Architecture** solution (Domain, Application, Infrastructure, Api) with **JWT sign-in**: entities, EF Core configurations, a repository, services and DTOs with validation, Controllers or Minimal APIs, a login endpoint, hashed passwords and API docs that accept the token. The admin password is shown once. A single-project layout is still available. A build check runs at the end |
+| **Database Studio** | Saved connections (passwords encrypted for your Windows account). An **ER diagram** of tables and relations (drag, zoom, auto-arrange, save as picture). Browse, search, filter, sort and edit data, add and delete rows, follow relations, import CSV/JSON and export CSV/JSON/SQL. Change the design: create, rename, empty and delete tables; add, change, rename and delete columns; keys, relations, indexes and views, each previewed before it runs. A SQL runner with trial runs that undo themselves and confirmation for destructive statements. Views, procedures and functions with their definitions |
+| **Source control (Git)** | On every .NET project, solution and front-end app: start tracking (with a safe ignore list), see changed files with line-by-line differences, save versions of all or some files, throw changes away, set work aside, history with search and per-version details, undo a version, labels, branches (create, switch, merge with conflict help, rename, delete), get latest / send with live progress, and copy a project from any Git server |
+| **Front-end apps** | Angular, React, Next.js and Vue: pages and routes, components, every API call matched against the linked .NET API, environment settings, install, run with live reload, build, health check and deploy (including Docker with nginx) |
 | **Health check** | Scores the project and lists problems: duplicate routes, open endpoints in a protected API, keys and certificates in the project folder, passwords in config files, error details sent to callers, data changes through GET, unsupported .NET versions, old packages, missing descriptions |
 | **Upgrade assistant** | Moves .NET Core 2.x/3.x and .NET 5–9 projects (optionally with the projects they use) to a newer .NET: target framework (also in `Directory.Build.props`), version-matched packages (also in `Directory.Packages.props`), obsolete ASP.NET Core 2 packages, and package conflicts found by restore. One Undo reverts it all |
 | **Every .NET version** | Detects each project's .NET version and writes code that fits it (see the table below) |
@@ -40,7 +43,7 @@ React UI (Vite, TypeScript)  ──/api──▶  Local helper service (ASP.NET 
   * **Controllers**: `[ApiController]` classes, `[Route]` and `[Http*]` attributes, including `[controller]` and `[action]` tokens.
   * **Minimal APIs**: `MapGet/MapPost/…` calls, `MapGroup` prefixes followed through variables, and `WithName`/`WithSummary`/`RequireAuthorization` chains.
 * Changes are small, targeted text edits based on the syntax tree, so the rest of the file keeps its formatting. When needed, the studio also wires up `Program.cs`, for example `AddControllers()`/`MapControllers()` or registering a new endpoint group.
-* History backups are stored in `%LOCALAPPDATA%\EndpointStudio`, never inside your project.
+* History backups, saved connections and settings are stored in `%LOCALAPPDATA%\Stackwright`, never inside your project. Database passwords are encrypted with Windows DPAPI and never sent back to the browser.
 
 ## .NET version support
 
@@ -61,6 +64,17 @@ Generated code follows each project's settings: nullable annotations only when `
 | .NET 8 | 8.0.34 | 8.0.3 | Swagger UI (Swashbuckle 6.9) |
 | .NET 9 | 9.0.23 | 9.0.0 | Built-in OpenAPI + Scalar 2.21 |
 | .NET 10 / 11 | 10.0.15 / 11.0.0 | 9.0.0 | Built-in OpenAPI + Scalar 3.2 |
+
+Generated Clean Architecture solution:
+
+```
+MyApi.sln
+└─ src/
+   ├─ MyApi.Domain           entities (no dependencies)
+   ├─ MyApi.Application      services, DTOs and requests with validation, IRepository, IAuthService
+   ├─ MyApi.Infrastructure   AppDbContext, IEntityTypeConfiguration per table, Repository<T>, JWT tokens, password hashing
+   └─ MyApi.Api              controllers or minimal API endpoints ([Authorize] / RequireAuthorization), POST /api/auth/login, /health, API docs with bearer support
+```
 
 ## Databases
 

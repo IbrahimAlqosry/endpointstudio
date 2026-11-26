@@ -42,6 +42,8 @@ export function NewProjectPage() {
   const [location, setLocation] = useState('')
   const [style, setStyle] = useState<EndpointStyle>('Controller')
   const [docs, setDocs] = useState(true)
+  const [clean, setClean] = useState(true)
+  const [jwt, setJwt] = useState(true)
   const [targets, setTargets] = useState<TargetOption[]>([])
   const [tfm, setTfm] = useState('')
   const [busy, setBusy] = useState(false)
@@ -115,6 +117,8 @@ export function NewProjectPage() {
         location,
         style,
         includeApiDocs: docs,
+        cleanArchitecture: clean,
+        jwt: clean && jwt,
         tables: Object.entries(selection).filter(([, ops]) => ops.length > 0).map(([k, operations]) => {
           const t = tables.find(x => key(x) === k)!
           return { schema: t.schema, name: t.name, operations }
@@ -241,6 +245,12 @@ export function NewProjectPage() {
               </div>
             )}
           </Field>
+          <Field label="Structure">
+            <div className="choices" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+              <Choice icon="layers" title="Clean Architecture (recommended)" desc="A solution with Domain, Application, Infrastructure and Api projects. Business rules stay separate from the database and HTTP, so it grows well." selected={clean} onClick={() => setClean(true)} />
+              <Choice icon="box" title="Single project" desc="Everything in one small project. Good for prototypes and tiny services." selected={!clean} onClick={() => setClean(false)} />
+            </div>
+          </Field>
           <Field label="Endpoint style">
             <div className="choices" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
               <Choice icon="layers" title="Controllers" desc="Classic structure: one controller per table. Familiar to most .NET teams." selected={style === 'Controller'} onClick={() => setStyle('Controller')} />
@@ -255,8 +265,16 @@ export function NewProjectPage() {
             </div>
             <Switch checked={docs} onChange={setDocs} />
           </div>
+          <div className="card pad row" style={{ background: 'var(--bg-sunken)', opacity: clean ? 1 : .6 }}>
+            <div className="group-icon"><Icon name="lock" size={16} /></div>
+            <div className="grow">
+              <div className="strong">Sign-in with JWT</div>
+              <div className="small subtle">{clean ? 'Every endpoint requires a token from POST /api/auth/login. An admin account is created; its password is shown once when the project is ready.' : 'Available with Clean Architecture.'}</div>
+            </div>
+            <Switch checked={clean && jwt} onChange={setJwt} disabled={!clean} />
+          </div>
           <Alert kind="info">
-            A <strong>{target?.label ?? '.NET'}</strong> project with {selectedCount(selection)} table{selectedCount(selection) === 1 ? '' : 's'} and {Object.values(selection).reduce((n, o) => n + o.length, 0)} endpoints will be created from <strong>{conn.database}</strong>.
+            A <strong>{target?.label ?? '.NET'}</strong> {clean ? 'solution' : 'project'} with {selectedCount(selection)} table{selectedCount(selection) === 1 ? '' : 's'} and {Object.values(selection).reduce((n, o) => n + o.length, 0)} endpoints will be created from <strong>{conn.database}</strong>.
             {!conn.integratedSecurity && ' The database password will be stored in the project’s settings file.'}
           </Alert>
           <div className="row between">
@@ -418,9 +436,11 @@ function ResultView({ result }: { result: GenerateProjectResult }) {
             ? 'The project was created and it builds without errors. Open it to explore the endpoints, run it and try them out.'
             : 'The project was created, but the build check found problems. Open it to see the details.'}
         </p>
-        <div className="row mt-24" style={{ justifyContent: 'center' }}>
-          <Button variant="primary" size="lg" icon="arrowRight" onClick={() => navigate({ page: 'project', path: result.projectPath })}>Open the project</Button>
-          <Button size="lg" icon="folder" onClick={() => api.reveal(result.projectPath)}>Show in folder</Button>
+        {result.adminPassword && <SignInCard user={result.adminUser ?? 'admin'} password={result.adminPassword} />}
+        <div className="row mt-24 wrap" style={{ justifyContent: 'center' }}>
+          <Button variant="primary" size="lg" icon="arrowRight" onClick={() => navigate({ page: 'project', path: result.projectPath })}>Open the API project</Button>
+          {result.solutionPath && <Button size="lg" icon="layers" onClick={() => navigate({ page: 'solution', path: result.solutionPath! })}>Open the solution</Button>}
+          <Button size="lg" icon="folder" onClick={() => api.reveal(result.solutionPath ?? result.projectPath)}>Show in folder</Button>
         </div>
         <div className="divider" />
         <div className="row wrap" style={{ justifyContent: 'center' }}>
@@ -432,6 +452,21 @@ function ResultView({ result }: { result: GenerateProjectResult }) {
             {result.build.errors.slice(0, 5).map((e, i) => <Alert key={i} kind="warning">{e.file ? `${e.file.split('/').pop()}: ` : ''}{e.message}</Alert>)}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function SignInCard({ user, password }: { user: string; password: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="card pad col gap-8 mt-16" style={{ textAlign: 'left', background: 'var(--warning-soft)', borderColor: 'color-mix(in srgb, var(--warning) 40%, var(--border))' }}>
+      <div className="row gap-8"><Icon name="key" size={16} /><span className="strong grow">Admin sign-in: save this password now</span></div>
+      <div className="small">It’s stored only as a hash in the project, so it can’t be shown again. Use it with <span className="mono">POST /api/auth/login</span>.</div>
+      <div className="row gap-8 wrap">
+        <span className="badge">User</span><span className="mono strong">{user}</span>
+        <span className="badge">Password</span><span className="mono strong">{password}</span>
+        <Button size="sm" icon={copied ? 'check' : 'copy'} onClick={() => { navigator.clipboard?.writeText(password); setCopied(true) }}>{copied ? 'Copied' : 'Copy'}</Button>
       </div>
     </div>
   )

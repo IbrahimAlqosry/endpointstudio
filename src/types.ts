@@ -198,8 +198,10 @@ export interface GenerateProjectRequest {
   style: EndpointStyle
   tables: { schema: string; name: string; operations: string[] }[]
   includeApiDocs: boolean
+  cleanArchitecture: boolean
+  jwt: boolean
 }
-export interface GenerateProjectResult { projectPath: string; createdFiles: string[]; build: BuildResult | null }
+export interface GenerateProjectResult { projectPath: string; createdFiles: string[]; build: BuildResult | null; solutionPath: string | null; adminUser: string | null; adminPassword: string | null }
 
 // ---------- Database Studio ----------
 export interface DbsColumn { name: string; type: string; nullable: boolean; default: string | null; identity: boolean; primaryKey: boolean; computed: boolean; position: number; maxLength: number | null }

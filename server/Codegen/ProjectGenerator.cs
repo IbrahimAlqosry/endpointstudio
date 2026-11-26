@@ -8,12 +8,12 @@ using Microsoft.CodeAnalysis.CSharp;
 namespace Stackwright.Server.Codegen;
 
 /// <summary>Creates a brand-new Web API project from a database's tables.</summary>
-public class ProjectGenerator(DatabaseService db, EndpointWriter writer, HistoryService history, DotnetService dotnet)
+public partial class ProjectGenerator(DatabaseService db, EndpointWriter writer, HistoryService history, DotnetService dotnet)
 {
     private const string Nl = "\r\n";
 
     /// <summary>Package versions that are known to work with each .NET version.</summary>
-    public sealed record TargetPackages(int Major, string EfSqlServer, string Pomelo, string Npgsql, string OracleEf, string? OpenApi, string? Scalar, string? Swashbuckle)
+    public sealed record TargetPackages(int Major, string EfSqlServer, string Pomelo, string Npgsql, string OracleEf, string? OpenApi, string? Scalar, string? Swashbuckle, string JwtBearer, string DiAbstractions)
     {
         public string Tfm => $"net{Major}.0";
         public int EfMajor => int.Parse(EfSqlServer.Split('.')[0]);
@@ -23,13 +23,13 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
 
     public static readonly Dictionary<int, TargetPackages> SupportedTargets = new()
     {
-        //          EF Core (SQL Server & SQLite), Pomelo (MySQL), Npgsql (PostgreSQL), Oracle EF, OpenAPI, Scalar, Swashbuckle
-        [6] = new(6, "7.0.20", "7.0.0", "7.0.18", "7.21.13", null, null, "6.9.0"),
-        [7] = new(7, "7.0.20", "7.0.0", "7.0.18", "7.21.13", null, null, "6.9.0"),
-        [8] = new(8, "8.0.34", "8.0.3", "8.0.11", "8.23.26400", null, null, "6.9.0"),
-        [9] = new(9, "9.0.23", "9.0.0", "9.0.4", "9.23.26400", "9.0.23", "2.21.0", null), // Scalar 3.x needs .NET 10+
-        [10] = new(10, "10.0.15", "9.0.0", "10.0.4", "10.23.26400", "10.0.15", "3.2.1", null),
-        [11] = new(11, "11.0.0", "9.0.0", "11.0.0", "10.23.26400", "11.0.0", "3.2.1", null),
+        //          EF Core (SQL Server & SQLite), Pomelo (MySQL), Npgsql (PostgreSQL), Oracle EF, OpenAPI, Scalar, Swashbuckle, JWT bearer, DI abstractions
+        [6] = new(6, "7.0.20", "7.0.0", "7.0.18", "7.21.13", null, null, "6.9.0", "6.0.36", "7.0.0"),
+        [7] = new(7, "7.0.20", "7.0.0", "7.0.18", "7.21.13", null, null, "6.9.0", "7.0.20", "7.0.0"),
+        [8] = new(8, "8.0.34", "8.0.3", "8.0.11", "8.23.26400", null, null, "6.9.0", "8.0.34", "8.0.2"),
+        [9] = new(9, "9.0.23", "9.0.0", "9.0.4", "9.23.26400", "9.0.23", "2.21.0", null, "9.0.23", "9.0.23"), // Scalar 3.x needs .NET 10+
+        [10] = new(10, "10.0.15", "9.0.0", "10.0.4", "10.23.26400", "10.0.15", "3.2.1", null, "10.0.15", "10.0.15"),
+        [11] = new(11, "11.0.0", "9.0.0", "11.0.0", "10.23.26400", "11.0.0", "3.2.1", null, "11.0.0", "11.0.0"),
     };
 
     private sealed record EntityPlan(DbTable Table, string ClassName, string SetName, List<(DbColumn Column, string Property)> Props, List<string> Operations);
@@ -57,7 +57,7 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
 
         // ---- Plan entities ----
         var plans = new List<EntityPlan>();
-        var usedClassNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "AppDbContext", "Program", ns.Split('.').Last() };
+        var usedClassNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "AppDbContext", "Program", "Repository", "AuthService", "PagedResult", "DependencyInjection", ns.Split('.').Last() };
         foreach (var sel in req.Tables)
         {
             var table = allTables.FirstOrDefault(t => t.Schema == sel.Schema && t.Name == sel.Name)
@@ -101,6 +101,17 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
 
         try
         {
+            if (req.CleanArchitecture)
+            {
+                var clean = GenerateClean(req, dir, name, ns, target, serverVersion, plans, Write);
+                created = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+                    .Select(f => Path.GetRelativePath(dir, f).Replace(Path.DirectorySeparatorChar, '/')).OrderBy(f => f).ToList();
+                BuildResult? cleanBuild = null;
+                try { cleanBuild = await dotnet.BuildAsync(clean.ApiProject, ct); }
+                catch (StudioException) { /* build is a best-effort check */ }
+                return new GenerateProjectResult(clean.ApiProject, created, cleanBuild, clean.SolutionPath, req.Jwt ? clean.AdminUser : null, clean.AdminPassword);
+            }
+
             var csprojPath = Path.Combine(dir, name + ".csproj");
             Write(name + ".csproj", Csproj(req, ns, target));
             Write("Program.cs", ProgramCs(req, ns, serverVersion, target));
