@@ -138,8 +138,8 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
           <div className="crumbs"><a href={href({ page: 'home' })}>Home</a><Icon name="chevronRight" size={12} /><span>Project</span></div>
           <div className="row wrap">
             <h1 className="page-title">{project.name}</h1>
-            <span className="badge">{frameworkLabel(project.targetFramework)}</span>
-            <span className="badge accent">{project.preferredStyle === 'Controller' ? 'Controllers' : 'Minimal APIs'}</span>
+            <span className={`badge${project.capabilities.platform === 'NetFramework' ? ' warning' : ''}`} title={project.targetFramework}>{project.capabilities.frameworkLabel}</span>
+            <span className="badge accent">{project.capabilities.platform === 'NetFramework' ? 'Web API 2' : project.preferredStyle === 'Controller' ? 'Controllers' : 'Minimal APIs'}</span>
             {project.entities.length > 0 && <span className="badge success"><Icon name="database" size={12} /> Database connected</span>}
           </div>
           <div className="row small subtle mt-8" title={project.directory} style={{ flexWrap: 'nowrap' }}>
@@ -152,14 +152,16 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
         </div>
         <div className="row wrap">
           <Button icon="history" onClick={() => setHistoryOpen(true)}>History{project.history.length > 0 ? ` (${project.history.length})` : ''}</Button>
-          <Button icon="hammer" onClick={runBuild} disabled={run?.running}>Check build</Button>
+          <Button icon="hammer" onClick={runBuild} disabled={run?.running || !project.capabilities.canBuild} title={project.capabilities.buildNote ?? undefined}>Check build</Button>
           <Button variant="primary" icon="plus" onClick={() => setEditor({ mode: 'add' })}>Add endpoint</Button>
         </div>
       </div>
 
       {project.warnings.map(w => <div key={w} style={{ marginBottom: 14 }}><Alert kind="warning">{w}</Alert></div>)}
+      {project.capabilities.supportNote && <div style={{ marginBottom: 14 }}><Alert kind="info">{project.capabilities.supportNote}</Alert></div>}
+      {project.capabilities.buildNote && <div style={{ marginBottom: 14 }}><Alert kind="warning">{project.capabilities.buildNote}</Alert></div>}
 
-      <RunBar run={run} busy={busy} onToggle={toggleRun} onExport={exportPostman} />
+      <RunBar run={run} busy={busy} onToggle={toggleRun} onExport={exportPostman} canRun={project.capabilities.canRun} runNote={project.capabilities.runNote} framework={project.capabilities.platform === 'NetFramework'} />
 
       <div className="stats">
         <div className="card stat">
@@ -265,7 +267,9 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
   )
 }
 
-function RunBar({ run, busy, onToggle, onExport }: { run: RunStatus | null; busy: boolean; onToggle: () => void; onExport: () => void }) {
+function RunBar({ run, busy, onToggle, onExport, canRun, runNote, framework }: {
+  run: RunStatus | null; busy: boolean; onToggle: () => void; onExport: () => void; canRun: boolean; runNote: string | null; framework: boolean
+}) {
   const [showLog, setShowLog] = useState(false)
   const state = run?.state ?? 'stopped'
   const label = state === 'running' ? 'Your API is running' : state === 'starting' ? 'Starting your API…' : state === 'failed' ? 'Your API couldn’t start' : 'Your API is not running'
@@ -277,13 +281,14 @@ function RunBar({ run, busy, onToggle, onExport }: { run: RunStatus | null; busy
           <div className="strong">{label}</div>
           <div className="small subtle">
             {state === 'running' && run?.url ? <>Available at <a href={run.url} target="_blank" rel="noreferrer" className="mono">{run.url}</a> — try any endpoint from its details.</> :
-              state === 'failed' ? 'Check the build to see what went wrong.' :
-                'Start it to try your endpoints right here.'}
+              state === 'failed' ? 'Check the build or the output to see what went wrong.' :
+                !canRun ? runNote :
+                  framework ? 'Start it with IIS Express to try your endpoints right here.' : 'Start it to try your endpoints right here.'}
           </div>
         </div>
         {run && run.log.length > 1 && <Button size="sm" variant="ghost" icon="fileText" onClick={() => setShowLog(s => !s)}>{showLog ? 'Hide output' : 'Show output'}</Button>}
         <Button size="sm" icon="download" onClick={onExport}>Export to Postman</Button>
-        <Button size="sm" variant={run?.running ? 'default' : 'success'} icon={run?.running ? 'stop' : 'play'} loading={busy || state === 'starting'} onClick={onToggle}>
+        <Button size="sm" variant={run?.running ? 'default' : 'success'} icon={run?.running ? 'stop' : 'play'} loading={busy || state === 'starting'} onClick={onToggle} disabled={!run?.running && !canRun} title={!canRun ? runNote ?? undefined : undefined}>
           {run?.running ? 'Stop' : 'Run'}
         </Button>
       </div>
@@ -294,9 +299,4 @@ function RunBar({ run, busy, onToggle, onExport }: { run: RunStatus | null; busy
 
 function splitWords(s: string) {
   return s.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-}
-
-function frameworkLabel(tfm: string) {
-  const m = tfm.match(/^net(\d+)\.(\d+)/)
-  return m ? `.NET ${m[1]}${m[2] !== '0' ? '.' + m[2] : ''}` : tfm
 }

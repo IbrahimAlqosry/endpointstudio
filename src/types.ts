@@ -42,11 +42,24 @@ export interface EntityInfo {
 
 export interface HistoryEntry { id: string; time: string; description: string }
 
+export interface ProjectCapabilities {
+  platform: 'NetCore' | 'NetFramework'
+  frameworkLabel: string
+  supportsMinimalApis: boolean
+  supportsHeaderInputs: boolean
+  canBuild: boolean
+  canRun: boolean
+  buildNote: string | null
+  runNote: string | null
+  supportNote: string | null
+}
+
 export interface ProjectDetails {
   name: string
   path: string
   directory: string
   targetFramework: string
+  capabilities: ProjectCapabilities
   rootNamespace: string
   preferredStyle: EndpointStyle
   endpoints: EndpointInfo[]
@@ -97,8 +110,21 @@ export interface DbConnectionInfo {
 export interface DbColumn { name: string; sqlType: string; clrType: string; nullable: boolean; isPrimaryKey: boolean; isIdentity: boolean; isComputed: boolean; maxLength: number | null; supported: boolean }
 export interface DbTable { schema: string; name: string; columns: DbColumn[]; isView: boolean; rowCount: number | null }
 
+export interface TargetOption { tfm: string; major: number; label: string; support: string; canBuild: boolean; canRun: boolean; recommended: boolean }
+
+export interface SystemInfo {
+  dotnetVersion: string
+  sdks: number[]
+  runtimes: number[]
+  hasVisualStudio: boolean
+  hasIisExpress: boolean
+  targets: TargetOption[]
+  defaultLocation: string
+}
+
 export interface GenerateProjectRequest {
   connection: DbConnectionInfo
+  targetFramework: string
   projectName: string
   location: string
   style: EndpointStyle

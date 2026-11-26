@@ -12,14 +12,24 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
 {
     private const string Nl = "\r\n";
 
-    public static class Versions
+    /// <summary>Package versions that are known to work with each .NET version.</summary>
+    public sealed record TargetPackages(int Major, string EfSqlServer, string Pomelo, string? OpenApi, string? Scalar, string? Swashbuckle)
     {
-        public const string Tfm = "net10.0";
-        public const string AspNet = "10.0.15";
-        public const string EfSqlServer = "10.0.15";
-        public const string PomeloMySql = "9.0.0";
-        public const string Scalar = "3.2.1";
+        public string Tfm => $"net{Major}.0";
+        public int EfMajor => int.Parse(EfSqlServer.Split('.')[0]);
+        /// <summary>.NET 9+ ships its own OpenAPI document generator; older versions use Swagger (Swashbuckle).</summary>
+        public bool BuiltInOpenApi => OpenApi is not null;
     }
+
+    public static readonly Dictionary<int, TargetPackages> SupportedTargets = new()
+    {
+        [6] = new(6, "7.0.20", "7.0.0", null, null, "6.9.0"),
+        [7] = new(7, "7.0.20", "7.0.0", null, null, "6.9.0"),
+        [8] = new(8, "8.0.34", "8.0.3", null, null, "6.9.0"),
+        [9] = new(9, "9.0.23", "9.0.0", "9.0.23", "2.21.0", null), // Scalar 3.x needs .NET 10+
+        [10] = new(10, "10.0.15", "9.0.0", "10.0.15", "3.2.1", null),
+        [11] = new(11, "11.0.0", "9.0.0", "11.0.0", "3.2.1", null),
+    };
 
     private sealed record EntityPlan(DbTable Table, string ClassName, string SetName, List<(DbColumn Column, string Property)> Props, List<string> Operations);
 
@@ -36,6 +46,10 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
         if (Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any())
             throw new StudioException($"The folder \"{name}\" already exists in that location and isn't empty.");
 
+        var target = ResolveTarget(req.TargetFramework);
+        var tc = await dotnet.GetToolchainAsync();
+        if (tc.SdkMajors.Count > 0 && tc.SdkMajors.Max() < target.Major)
+            throw new StudioException($".NET {target.Major} projects need the .NET {target.Major} SDK, which isn't installed.");
         var allTables = await db.GetTablesAsync(req.Connection, ct);
         var serverVersion = req.Connection.Provider == DbProvider.MySql ? await db.ServerVersionAsync(req.Connection, ct) : null;
         var ns = Regex.Replace(name, @"[^A-Za-z0-9_.]", "_");
@@ -54,8 +68,12 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
 
             var props = new List<(DbColumn, string)>();
             var usedProps = new HashSet<string>(StringComparer.Ordinal) { className };
-            foreach (var col in table.Columns.Where(c => c.Supported))
+            foreach (var raw in table.Columns.Where(c => c.Supported))
             {
+                // DateOnly/TimeOnly are mapped natively from EF Core 8; older versions use DateTime/TimeSpan
+                var col = target.EfMajor < 8 && raw.ClrType is "DateOnly" or "TimeOnly"
+                    ? raw with { ClrType = raw.ClrType == "DateOnly" ? "DateTime" : "TimeSpan" }
+                    : raw;
                 var p = Identifier(col.Name);
                 if (p.Length == 0) continue;
                 while (!usedProps.Add(p)) p += "Value";
@@ -83,20 +101,21 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
         try
         {
             var csprojPath = Path.Combine(dir, name + ".csproj");
-            Write(name + ".csproj", Csproj(req, ns));
-            Write("Program.cs", ProgramCs(req, ns, serverVersion));
+            Write(name + ".csproj", Csproj(req, ns, target));
+            Write("Program.cs", ProgramCs(req, ns, serverVersion, target));
             Write("appsettings.json", AppSettings(db.ConnectionString(req.Connection, forApp: true)));
-            Write(Path.Combine("Properties", "launchSettings.json"), LaunchSettings(req.IncludeApiDocs));
+            Write(Path.Combine("Properties", "launchSettings.json"), LaunchSettings(req.IncludeApiDocs, target));
             Write(".gitignore", "bin/" + Nl + "obj/" + Nl + ".vs/" + Nl + "*.user" + Nl);
             Write(Path.Combine("Data", "AppDbContext.cs"), DbContextCs(ns, plans, req.Connection.Provider));
             foreach (var p in plans) Write(Path.Combine("Entities", p.ClassName + ".cs"), EntityCs(ns, p));
-            Write("README.md", Readme(name, req, plans));
+            Write("README.md", Readme(name, req, plans, target));
 
             // ---- Endpoints, added through the same engine the editor uses ----
             foreach (var p in plans)
             {
                 var route = "/api/" + Kebab(p.SetName);
                 string? groupKey = null;
+                var groupBase = route;
                 foreach (var op in new[] { "list", "get", "create", "update", "delete" }.Where(p.Operations.Contains))
                 {
                     var (verb, rel, behavior, epName, summary) = op switch
@@ -107,16 +126,21 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
                         "update" => ("PUT", "{id}", Behaviors.EntityUpdate, $"Update{p.ClassName}", $"Update an existing {Words(p.ClassName).ToLowerInvariant()}"),
                         _ => ("DELETE", "{id}", Behaviors.EntityDelete, $"Delete{p.ClassName}", $"Delete a {Words(p.ClassName).ToLowerInvariant()}"),
                     };
+                    // Groups without a shared path prefix (.NET 6 minimal APIs) need the full path for each endpoint
+                    var relRoute = groupKey is not null && groupBase == "/" ? (route.TrimStart('/') + (rel.Length > 0 ? "/" + rel : "")) : rel;
                     var add = new AddEndpointRequest(
                         GroupKey: groupKey,
                         NewGroup: groupKey is null ? new NewGroupRequest(p.SetName, req.Style, route) : null,
-                        HttpMethod: verb, Route: rel, Name: epName, Summary: summary, RequiresAuth: false,
+                        HttpMethod: verb, Route: relRoute, Name: epName, Summary: summary, RequiresAuth: false,
                         Behavior: behavior, Message: null, Entity: p.ClassName, FilterProperty: null, Parameters: null);
                     writer.Add(csprojPath, add);
                     if (groupKey is null)
                     {
                         var model = ProjectAnalyzer.Analyze(csprojPath);
-                        groupKey = model.Groups.First(g => g.BaseRoute.Equals(route, StringComparison.OrdinalIgnoreCase)).Key;
+                        var group = model.Groups.FirstOrDefault(g => g.BaseRoute.Equals(route, StringComparison.OrdinalIgnoreCase))
+                                    ?? model.Groups.First(g => g.File.Relative.EndsWith($"/{p.SetName}Endpoints.cs") || g.File.Relative.EndsWith($"/{p.SetName}Controller.cs"));
+                        groupKey = group.Key;
+                        groupBase = group.BaseRoute;
                     }
                 }
             }
@@ -139,33 +163,44 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
 
     // ------------------------------------------------------------------ Templates
 
-    private static string Csproj(GenerateProjectRequest req, string ns)
+    private static TargetPackages ResolveTarget(string? tfm)
+    {
+        if (string.IsNullOrWhiteSpace(tfm)) return SupportedTargets[10];
+        var m = Regex.Match(tfm, @"^net(\d+)\.0$");
+        if (m.Success && SupportedTargets.TryGetValue(int.Parse(m.Groups[1].Value), out var t)) return t;
+        throw new StudioException($"Creating {tfm} projects isn't supported. Choose .NET 6 or newer.");
+    }
+
+    private static string Csproj(GenerateProjectRequest req, string ns, TargetPackages target)
     {
         var sb = new StringBuilder();
         sb.Append("<Project Sdk=\"Microsoft.NET.Sdk.Web\">").Append(Nl).Append(Nl);
         sb.Append("  <PropertyGroup>").Append(Nl);
-        sb.Append($"    <TargetFramework>{Versions.Tfm}</TargetFramework>").Append(Nl);
+        sb.Append($"    <TargetFramework>{target.Tfm}</TargetFramework>").Append(Nl);
         sb.Append("    <Nullable>enable</Nullable>").Append(Nl);
         sb.Append("    <ImplicitUsings>enable</ImplicitUsings>").Append(Nl);
         sb.Append($"    <RootNamespace>{ns}</RootNamespace>").Append(Nl);
         sb.Append("  </PropertyGroup>").Append(Nl).Append(Nl);
         sb.Append("  <ItemGroup>").Append(Nl);
-        sb.Append($"    <PackageReference Include=\"Microsoft.AspNetCore.OpenApi\" Version=\"{Versions.AspNet}\" />").Append(Nl);
+        if (target.BuiltInOpenApi)
+            sb.Append($"    <PackageReference Include=\"Microsoft.AspNetCore.OpenApi\" Version=\"{target.OpenApi}\" />").Append(Nl);
         if (req.Connection.Provider == DbProvider.SqlServer)
-            sb.Append($"    <PackageReference Include=\"Microsoft.EntityFrameworkCore.SqlServer\" Version=\"{Versions.EfSqlServer}\" />").Append(Nl);
+            sb.Append($"    <PackageReference Include=\"Microsoft.EntityFrameworkCore.SqlServer\" Version=\"{target.EfSqlServer}\" />").Append(Nl);
         else
-            sb.Append($"    <PackageReference Include=\"Pomelo.EntityFrameworkCore.MySql\" Version=\"{Versions.PomeloMySql}\" />").Append(Nl);
-        if (req.IncludeApiDocs)
-            sb.Append($"    <PackageReference Include=\"Scalar.AspNetCore\" Version=\"{Versions.Scalar}\" />").Append(Nl);
+            sb.Append($"    <PackageReference Include=\"Pomelo.EntityFrameworkCore.MySql\" Version=\"{target.Pomelo}\" />").Append(Nl);
+        if (req.IncludeApiDocs && target.BuiltInOpenApi)
+            sb.Append($"    <PackageReference Include=\"Scalar.AspNetCore\" Version=\"{target.Scalar}\" />").Append(Nl);
+        if (req.IncludeApiDocs && !target.BuiltInOpenApi)
+            sb.Append($"    <PackageReference Include=\"Swashbuckle.AspNetCore\" Version=\"{target.Swashbuckle}\" />").Append(Nl);
         sb.Append("  </ItemGroup>").Append(Nl).Append(Nl);
         sb.Append("</Project>").Append(Nl);
         return sb.ToString();
     }
 
-    private static string ProgramCs(GenerateProjectRequest req, string ns, string? mysqlVersion)
+    private static string ProgramCs(GenerateProjectRequest req, string ns, string? mysqlVersion, TargetPackages target)
     {
         var l = new List<string> { "using Microsoft.EntityFrameworkCore;" };
-        if (req.IncludeApiDocs) l.Add("using Scalar.AspNetCore;");
+        if (req.IncludeApiDocs && target.BuiltInOpenApi) l.Add("using Scalar.AspNetCore;");
         l.Add($"using {ns}.Data;");
         l.Add("");
         l.Add("var builder = WebApplication.CreateBuilder(args);");
@@ -186,16 +221,27 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
         l.Add("");
         l.Add("// API");
         if (req.Style == EndpointStyle.Controller) l.Add("builder.Services.AddControllers();");
-        l.Add("builder.Services.AddOpenApi();");
+        if (target.BuiltInOpenApi) l.Add("builder.Services.AddOpenApi();");
+        else if (req.IncludeApiDocs)
+        {
+            l.Add("builder.Services.AddEndpointsApiExplorer();");
+            l.Add("builder.Services.AddSwaggerGen();");
+        }
         l.Add("builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));");
         l.Add("");
         l.Add("var app = builder.Build();");
         l.Add("");
-        l.Add("app.MapOpenApi();");
-        if (req.IncludeApiDocs)
+        if (target.BuiltInOpenApi) l.Add("app.MapOpenApi();");
+        if (req.IncludeApiDocs && target.BuiltInOpenApi)
         {
             l.Add("app.MapScalarApiReference();");
             l.Add("app.MapGet(\"/\", () => Results.Redirect(\"/scalar\")).ExcludeFromDescription();");
+        }
+        else if (req.IncludeApiDocs)
+        {
+            l.Add("app.UseSwagger();");
+            l.Add("app.UseSwaggerUI();");
+            l.Add("app.MapGet(\"/\", () => Results.Redirect(\"/swagger\")).ExcludeFromDescription();");
         }
         l.Add("app.UseCors();");
         if (req.Style == EndpointStyle.Controller) l.Add("app.MapControllers();");
@@ -212,7 +258,7 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
             AllowedHosts = "*",
         }, new JsonSerializerOptions { WriteIndented = true }).Replace("\n", Nl) + Nl;
 
-    private static string LaunchSettings(bool docs)
+    private static string LaunchSettings(bool docs, TargetPackages target)
     {
         var port = Random.Shared.Next(5100, 5900);
         var obj = new Dictionary<string, object>
@@ -224,7 +270,7 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
                     ["commandName"] = "Project",
                     ["dotnetRunMessages"] = true,
                     ["launchBrowser"] = true,
-                    ["launchUrl"] = docs ? "scalar" : "openapi/v1.json",
+                    ["launchUrl"] = !docs ? (target.BuiltInOpenApi ? "openapi/v1.json" : "") : target.BuiltInOpenApi ? "scalar" : "swagger",
                     ["applicationUrl"] = $"http://localhost:{port}",
                     ["environmentVariables"] = new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Development" },
                 },
@@ -242,8 +288,12 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
             "",
             $"namespace {ns}.Data;",
             "",
-            "public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)",
+            "public class AppDbContext : DbContext",
             "{",
+            "    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)",
+            "    {",
+            "    }",
+            "",
         };
         foreach (var p in plans) l.Add($"    public DbSet<{p.ClassName}> {p.SetName} => Set<{p.ClassName}>();");
         l.Add("");
@@ -300,20 +350,21 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
             var isRef = col.ClrType is "string" or "byte[]";
             var nullable = col.Nullable || col.IsComputed && isRef;
             var type = col.ClrType + (nullable ? "?" : "");
-            var init = isRef && !nullable ? (col.ClrType == "string" ? " = string.Empty;" : " = [];") : "";
+            var init = isRef && !nullable ? (col.ClrType == "string" ? " = string.Empty;" : " = Array.Empty<byte>();") : "";
             l.Add($"    public {type} {prop} {{ get; set; }}{init}");
         }
         l.Add("}");
         return string.Join(Nl, l) + Nl;
     }
 
-    private static string Readme(string name, GenerateProjectRequest req, List<EntityPlan> plans)
+    private static string Readme(string name, GenerateProjectRequest req, List<EntityPlan> plans, TargetPackages target)
     {
         var sb = new StringBuilder();
         sb.Append($"# {name}").Append(Nl).Append(Nl);
         sb.Append($"Web API generated by Endpoint Studio from the `{req.Connection.Database}` database ").Append(req.Connection.Provider == DbProvider.SqlServer ? "(SQL Server)." : "(MySQL).").Append(Nl).Append(Nl);
         sb.Append("## Run").Append(Nl).Append(Nl).Append("```").Append(Nl).Append("dotnet run").Append(Nl).Append("```").Append(Nl).Append(Nl);
-        if (req.IncludeApiDocs) sb.Append("Interactive API docs are served at `/scalar`.").Append(Nl).Append(Nl);
+        sb.Append($"Target framework: .NET {target.Major}.").Append(Nl).Append(Nl);
+        if (req.IncludeApiDocs) sb.Append($"Interactive API docs are served at `/{(target.BuiltInOpenApi ? "scalar" : "swagger")}`.").Append(Nl).Append(Nl);
         sb.Append("## Resources").Append(Nl).Append(Nl);
         foreach (var p in plans)
             sb.Append($"- `/api/{Kebab(p.SetName)}` → `{p.Table.Schema}.{p.Table.Name}` ({string.Join(", ", p.Operations)})").Append(Nl);

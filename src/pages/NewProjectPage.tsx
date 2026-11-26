@@ -4,7 +4,7 @@ import { FolderPicker } from '../components/FolderPicker'
 import { Icon } from '../components/Icon'
 import { Alert, Button, Choice, Field, Spinner, Switch, errorText } from '../components/ui'
 import { href, navigate } from '../router'
-import type { DbConnectionInfo, DbTable, EndpointStyle, GenerateProjectResult } from '../types'
+import type { DbConnectionInfo, DbTable, EndpointStyle, GenerateProjectResult, TargetOption } from '../types'
 
 const OPS = [
   { id: 'list', label: 'List', needsKey: false },
@@ -36,13 +36,22 @@ export function NewProjectPage() {
   const [location, setLocation] = useState('')
   const [style, setStyle] = useState<EndpointStyle>('Controller')
   const [docs, setDocs] = useState(true)
+  const [targets, setTargets] = useState<TargetOption[]>([])
+  const [tfm, setTfm] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [picker, setPicker] = useState(false)
   const [result, setResult] = useState<GenerateProjectResult | null>(null)
   const [generating, setGenerating] = useState(false)
 
-  useEffect(() => { api.system().then(s => setLocation(l => l || s.defaultLocation)).catch(() => {}) }, [])
+  useEffect(() => {
+    api.system().then(s => {
+      setLocation(l => l || s.defaultLocation)
+      setTargets(s.targets)
+      setTfm(t => t || (s.targets.find(x => x.recommended) ?? s.targets[0])?.tfm || 'net10.0')
+    }).catch(() => {})
+  }, [])
+  const target = targets.find(t => t.tfm === tfm)
 
   const set = (patch: Partial<DbConnectionInfo>) => setConn(c => ({ ...c, ...patch }))
 
@@ -77,6 +86,7 @@ export function NewProjectPage() {
     try {
       const r = await api.generate({
         connection: conn,
+        targetFramework: tfm || 'net10.0',
         projectName: projectName.trim(),
         location,
         style,
@@ -176,6 +186,22 @@ export function NewProjectPage() {
               </div>
             </Field>
           </div>
+          <Field label=".NET version" hint="Pick the version your team uses. Each one gets the matching database and documentation packages.">
+            {targets.length === 0 ? <div className="row small subtle"><Spinner /> Checking which .NET versions are installed…</div> : (
+              <div className="choices" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))' }}>
+                {targets.map(t => (
+                  <button key={t.tfm} type="button" className={`choice${tfm === t.tfm ? ' selected' : ''}`} onClick={() => setTfm(t.tfm)} style={{ flexDirection: 'column', gap: 6 }}>
+                    <span className="row between" style={{ width: '100%' }}>
+                      <span className="choice-title" style={{ fontSize: 15 }}>{t.label}</span>
+                      {t.recommended && <span className="badge success" style={{ height: 20 }}>Recommended</span>}
+                    </span>
+                    <span className="choice-desc">{t.support}</span>
+                    {!t.canRun && <span className="choice-desc" style={{ color: 'var(--warning)' }}>Runtime not installed: can build, can’t run here</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Field>
           <Field label="Endpoint style">
             <div className="choices" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
               <Choice icon="layers" title="Controllers" desc="Classic structure: one controller per table. Familiar to most .NET teams." selected={style === 'Controller'} onClick={() => setStyle('Controller')} />
@@ -186,12 +212,12 @@ export function NewProjectPage() {
             <div className="group-icon"><Icon name="fileText" size={16} /></div>
             <div className="grow">
               <div className="strong">Interactive API documentation</div>
-              <div className="small subtle">Adds a docs page to your API where every endpoint can be explored and tried in the browser.</div>
+              <div className="small subtle">Adds a docs page to your API where every endpoint can be explored and tried in the browser ({target && target.major < 9 ? 'Swagger UI' : 'Scalar'}).</div>
             </div>
             <Switch checked={docs} onChange={setDocs} />
           </div>
           <Alert kind="info">
-            {selectedCount(selection)} table{selectedCount(selection) === 1 ? '' : 's'} with {Object.values(selection).reduce((n, o) => n + o.length, 0)} endpoints will be created from <strong>{conn.database}</strong>.
+            A <strong>{target?.label ?? '.NET'}</strong> project with {selectedCount(selection)} table{selectedCount(selection) === 1 ? '' : 's'} and {Object.values(selection).reduce((n, o) => n + o.length, 0)} endpoints will be created from <strong>{conn.database}</strong>.
             {!conn.integratedSecurity && ' The database password will be stored in the project’s settings file.'}
           </Alert>
           <div className="row between">

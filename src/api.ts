@@ -1,5 +1,5 @@
 import type {
-  AddEndpointRequest, BrowseResult, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
+  AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
   GenerateProjectResult, ProjectDetails, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
 } from './types'
 
@@ -31,7 +31,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 const q = (path: string) => `path=${encodeURIComponent(path)}`
 
 export const api = {
-  system: () => request<{ dotnetVersion: string; defaultLocation: string }>('GET', '/api/system'),
+  system: () => request<SystemInfo>('GET', '/api/system'),
 
   browse: (path?: string | null) => request<BrowseResult>('GET', `/api/fs/browse${path ? `?${q(path)}` : ''}`),
   findProjects: (root: string) => request<ProjectFileEntry[]>('GET', `/api/fs/find-projects?root=${encodeURIComponent(root)}`),

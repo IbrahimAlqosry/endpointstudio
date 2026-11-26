@@ -36,6 +36,8 @@ public class EndpointWriter(HistoryService history)
         }
 
         var style = group?.Style ?? req.NewGroup!.Style;
+        if (style == EndpointStyle.MinimalApi && !model.SupportsMinimalApis)
+            throw new StudioException($"Minimal APIs need .NET 6 or newer. This project targets {model.FrameworkLabel}, so please use a controller group.");
         var baseRoute = group?.BaseRoute ?? ProjectAnalyzer.NormalizeRoute(req.NewGroup!.BaseRoute);
         var fullRoute = ProjectAnalyzer.CombineRoutes(baseRoute, route);
         EnsureNoConflict(model, verb, fullRoute, null);
@@ -60,15 +62,43 @@ public class EndpointWriter(HistoryService history)
     private sealed class Plan
     {
         public List<GenParam> Params { get; } = [];
-        public List<string> Body { get; } = []; // uses tokens: Ok(x) etc rendered per style
+        public List<string> Body { get; } = []; // uses tokens: @Ok(x) etc rendered per style and platform
         public bool Async { get; set; }
-        public HashSet<string> Usings { get; } = ["Microsoft.AspNetCore.Mvc"];
+        public HashSet<string> Usings { get; } = [];
         public EntityInfo? Entity { get; set; }
+        /// <summary>.NET Framework: no dependency injection, so the DbContext is created in the method.</summary>
+        public string? CreateContext { get; set; }
+        public required bool Framework { get; init; }
+        public required bool Nullable { get; init; }
+    }
+
+    private static readonly HashSet<string> ValueTypes = new(StringComparer.Ordinal)
+    {
+        "int", "long", "short", "byte", "sbyte", "uint", "ulong", "ushort", "decimal", "double", "float", "bool",
+        "Guid", "DateTime", "DateTimeOffset", "DateOnly", "TimeOnly", "TimeSpan", "JsonElement", "char",
+    };
+
+    private static Plan NewPlan(ProjectModel model)
+    {
+        var plan = new Plan { Framework = model.IsFramework, Nullable = model.NullableEnabled };
+        if (model.IsFramework)
+        {
+            plan.Usings.Add("System.Web.Http");
+            plan.Usings.Add("System.Net");
+        }
+        else plan.Usings.Add("Microsoft.AspNetCore.Mvc");
+        if (!model.ImplicitUsings)
+        {
+            plan.Usings.Add("System");
+            plan.Usings.Add("System.Linq");
+            plan.Usings.Add("System.Threading.Tasks");
+        }
+        return plan;
     }
 
     private static Plan BuildPlan(ProjectModel model, AddEndpointRequest req, string verb, string route, string fullRoute)
     {
-        var plan = new Plan();
+        var plan = NewPlan(model);
         var routeParams = ProjectAnalyzer.RouteParameterNames(route);
 
         if (Behaviors.IsEntity(req.Behavior))
@@ -77,7 +107,7 @@ public class EndpointWriter(HistoryService history)
                     ?? throw new StudioException("Please choose which data table this endpoint works with.");
             plan.Entity = e;
             plan.Async = true;
-            plan.Usings.Add("Microsoft.EntityFrameworkCore");
+            plan.Usings.Add(model.UsesEf6 ? "System.Data.Entity" : "Microsoft.EntityFrameworkCore");
             plan.Usings.Add(e.Namespace);
             plan.Usings.Add(e.ContextNamespace);
             var set = $"db.{e.DbSetName}";
@@ -90,28 +120,26 @@ public class EndpointWriter(HistoryService history)
                 if (routeParams.Count > 1) throw new StudioException("Only one {value} placeholder is allowed in the path for this kind of endpoint.");
                 plan.Params.Add(new GenParam(keyParam, e.KeyType, ParamSource.Route, false));
 
-                var findLines = new[]
-                {
-                    $"var existing = await {set}.FindAsync({keyParam});",
-                };
+                var find = $"var existing = await {set}.FindAsync({keyParam});";
                 switch (req.Behavior)
                 {
                     case Behaviors.EntityGet:
-                        plan.Body.Add(findLines[0]);
-                        plan.Body.Add("return existing is null ? @NotFound() : @Ok(existing);");
+                        plan.Body.Add(find);
+                        plan.Body.Add("if (existing == null) return @NotFound();");
+                        plan.Body.Add("return @Ok(existing);");
                         break;
                     case Behaviors.EntityUpdate:
                         plan.Params.Add(new GenParam("item", e.Name, ParamSource.Body, false));
-                        plan.Body.Add(findLines[0]);
-                        plan.Body.Add("if (existing is null) return @NotFound();");
+                        plan.Body.Add(find);
+                        plan.Body.Add("if (existing == null) return @NotFound();");
                         plan.Body.Add($"item.{e.KeyName} = {keyParam};");
                         plan.Body.Add("db.Entry(existing).CurrentValues.SetValues(item);");
                         plan.Body.Add("await db.SaveChangesAsync();");
                         plan.Body.Add("return @Ok(existing);");
                         break;
                     case Behaviors.EntityDelete:
-                        plan.Body.Add(findLines[0]);
-                        plan.Body.Add("if (existing is null) return @NotFound();");
+                        plan.Body.Add(find);
+                        plan.Body.Add("if (existing == null) return @NotFound();");
                         plan.Body.Add($"{set}.Remove(existing);");
                         plan.Body.Add("await db.SaveChangesAsync();");
                         plan.Body.Add("return @NoContent();");
@@ -127,9 +155,11 @@ public class EndpointWriter(HistoryService history)
                         plan.Params.Add(new GenParam("page", "int", ParamSource.Query, true));
                         plan.Params.Add(new GenParam("pageSize", "int", ParamSource.Query, true));
                         plan.Body.Add("var pageNumber = Math.Max(page ?? 1, 1);");
-                        plan.Body.Add("var size = Math.Clamp(pageSize ?? 50, 1, 500);");
+                        plan.Body.Add("var size = Math.Min(Math.Max(pageSize ?? 50, 1), 500);");
                         plan.Body.Add($"var items = await {set}.AsNoTracking()");
+                        // EF6 requires an order before Skip; it is also good practice for stable paging
                         if (e.KeyName is not null) plan.Body.Add($"    .OrderBy(x => x.{e.KeyName})");
+                        else if (model.UsesEf6) throw new StudioException($"{e.Name} has no single ID column, so it can't be listed page by page.");
                         plan.Body.Add("    .Skip((pageNumber - 1) * size)");
                         plan.Body.Add("    .Take(size)");
                         plan.Body.Add("    .ToListAsync();");
@@ -161,7 +191,8 @@ public class EndpointWriter(HistoryService history)
                         throw new StudioException("Unknown endpoint behavior.");
                 }
             }
-            plan.Params.Add(new GenParam("db", e.ContextName, ParamSource.Service, false));
+            if (model.IsFramework) plan.CreateContext = e.ContextName;
+            else plan.Params.Add(new GenParam("db", e.ContextName, ParamSource.Service, false));
             return plan;
         }
 
@@ -177,6 +208,8 @@ public class EndpointWriter(HistoryService history)
             if (p.Source == ParamSource.Route && !routeParams.Contains(p.Name))
                 throw new StudioException($"The path input \"{p.Name}\" must appear in the path as {{{p.Name}}}.");
             if (p.Source == ParamSource.Service) throw new StudioException("Service inputs can't be added from here.");
+            if (p.Source == ParamSource.Header && model.IsFramework)
+                throw new StudioException(".NET Framework Web API can't read inputs from headers directly. Use the query string or the body instead.");
             plan.Params.Add(new GenParam(p.Name, type, p.Source, p.Source != ParamSource.Route && p.Optional));
         }
         foreach (var rp in routeParams.Where(rp => !names.Contains(rp)))
@@ -217,7 +250,17 @@ public class EndpointWriter(HistoryService history)
     {
         if (ParamTypes.TryGetValue(type, out var t))
         {
-            if (t == "JsonElement") plan.Usings.Add("System.Text.Json");
+            if (t == "JsonElement")
+            {
+                if (model.IsFramework || model.FrameworkVersion is > 0 and < 3)
+                {
+                    // System.Text.Json isn't built in before .NET Core 3; use Json.NET's JObject instead
+                    plan.Usings.Add("Newtonsoft.Json.Linq");
+                    return "JObject";
+                }
+                plan.Usings.Add("System.Text.Json");
+            }
+            if (t == "DateOnly" && (model.IsFramework || model.FrameworkVersion is > 0 and < 6)) return "DateTime";
             return t;
         }
         var entity = model.Entities.FirstOrDefault(e => e.Name == type);
@@ -231,70 +274,88 @@ public class EndpointWriter(HistoryService history)
 
     // ---------- Rendering ----------
 
-    private static string RenderResult(string line, EndpointStyle style)
+    private static string RenderResult(string line, EndpointStyle style, bool framework)
     {
-        string R(string controller, string minimal) => style == EndpointStyle.Controller ? controller : minimal;
-        line = Regex.Replace(line, @"@Ok\(", R("Ok(", "Results.Ok("));
-        line = line.Replace("@NotFound()", R("NotFound()", "Results.NotFound()"));
-        line = line.Replace("@NoContent()", R("NoContent()", "Results.NoContent()"));
+        string R(string core, string fw, string minimal) => style == EndpointStyle.MinimalApi ? minimal : framework ? fw : core;
+        line = Regex.Replace(line, @"@Ok\(", R("Ok(", "Ok(", "Results.Ok("));
+        line = line.Replace("@NotFound()", R("NotFound()", "NotFound()", "Results.NotFound()"));
+        line = line.Replace("@NoContent()", R("NoContent()", "StatusCode(HttpStatusCode.NoContent)", "Results.NoContent()"));
         line = line.Replace("@NotImplemented()", R(
             "StatusCode(501, new { message = \"This endpoint is not implemented yet.\" })",
+            "Content((HttpStatusCode)501, new { message = \"This endpoint is not implemented yet.\" })",
             "Results.Json(new { message = \"This endpoint is not implemented yet.\" }, statusCode: 501)"));
-        line = Regex.Replace(line, @"@Created\((\w+)\)", m => R($"StatusCode(201, {m.Groups[1].Value})", $"Results.Json({m.Groups[1].Value}, statusCode: 201)"));
+        line = Regex.Replace(line, @"@Created\((\w+)\)", m => R(
+            $"StatusCode(201, {m.Groups[1].Value})",
+            $"Content(HttpStatusCode.Created, {m.Groups[1].Value})",
+            $"Results.Json({m.Groups[1].Value}, statusCode: 201)"));
         return line;
     }
 
-    private static string RenderParam(GenParam p, EndpointStyle style)
+    private static string RenderParam(GenParam p, EndpointStyle style, Plan plan)
     {
-        var attr = p.Source switch
-        {
-            ParamSource.Route => "[FromRoute] ",
-            ParamSource.Query => "[FromQuery] ",
-            ParamSource.Body => "[FromBody] ",
-            ParamSource.Header => "[FromHeader] ",
-            ParamSource.Service => style == EndpointStyle.Controller ? "[FromServices] " : "",
-            _ => "",
-        };
-        var type = p.Type + (p.Optional ? "?" : "");
+        var attr = plan.Framework
+            ? p.Source == ParamSource.Body ? "[FromBody] " : ""
+            : p.Source switch
+            {
+                ParamSource.Route => "[FromRoute] ",
+                ParamSource.Query => "[FromQuery] ",
+                ParamSource.Body => "[FromBody] ",
+                ParamSource.Header => "[FromHeader] ",
+                ParamSource.Service => style == EndpointStyle.Controller ? "[FromServices] " : "",
+                _ => "",
+            };
+        // Only add '?' to reference types when the project uses nullable reference types (C# 8+)
+        var nullableMark = p.Optional && (ValueTypes.Contains(p.Type) || plan.Nullable) ? "?" : "";
         var def = p.Optional && style == EndpointStyle.Controller ? " = null" : "";
-        return $"{attr}{type} {p.Name}{def}";
+        return $"{attr}{p.Type}{nullableMark} {p.Name}{def}";
+    }
+
+    private static List<string> RouteAttributes(bool framework, string verb, string route)
+    {
+        var http = "Http" + char.ToUpperInvariant(verb[0]) + verb[1..].ToLowerInvariant();
+        if (framework) return [$"[{http}]", $"[Route({TextEdits.Literal(route)})]"]; // Web API 2: [HttpGet] + [Route("…")]
+        return [string.IsNullOrEmpty(route) ? $"[{http}]" : $"[{http}({TextEdits.Literal(route)})]"];
     }
 
     private static string RenderControllerMethod(Plan plan, string verb, string route, string name, string? summary, bool auth, string ind, string nl)
     {
         var lines = new List<string>();
         if (!string.IsNullOrWhiteSpace(summary)) lines.AddRange(DocLines(summary, ind));
-        lines.Add($"{ind}[{HttpAttribute(verb, route)}]");
+        lines.AddRange(RouteAttributes(plan.Framework, verb, route).Select(a => ind + a));
         if (auth) lines.Add($"{ind}[Authorize]");
-        var ret = plan.Async ? "async Task<IActionResult>" : "IActionResult";
+        var result = plan.Framework ? "IHttpActionResult" : "IActionResult";
+        var ret = plan.Async ? $"async Task<{result}>" : result;
         var ordered = plan.Params.Where(p => !p.Optional).Concat(plan.Params.Where(p => p.Optional)); // C# needs optional parameters last
-        lines.Add($"{ind}public {ret} {name}({string.Join(", ", ordered.Select(p => RenderParam(p, EndpointStyle.Controller)))})");
+        lines.Add($"{ind}public {ret} {name}({string.Join(", ", ordered.Select(p => RenderParam(p, EndpointStyle.Controller, plan)))})");
         lines.Add($"{ind}{{");
-        lines.AddRange(plan.Body.Select(b => $"{ind}    {RenderResult(b, EndpointStyle.Controller)}"));
+        var bodyIndent = ind + "    ";
+        if (plan.CreateContext is not null)
+        {
+            lines.Add($"{bodyIndent}using (var db = new {plan.CreateContext}())");
+            lines.Add($"{bodyIndent}{{");
+            bodyIndent += "    ";
+        }
+        lines.AddRange(plan.Body.Select(b => bodyIndent + RenderResult(b, EndpointStyle.Controller, plan.Framework)));
+        if (plan.CreateContext is not null) lines.Add($"{ind}    }}");
         lines.Add($"{ind}}}");
         return string.Join(nl, lines);
     }
 
-    private static string RenderMinimal(Plan plan, ProjectModel model, string receiver, string verb, string route, string name, string? summary, bool auth, string ind, string nl)
+    private static string RenderMinimal(Plan plan, ProjectModel model, string receiver, string verb, string route, string name, string? summary, bool auth, string ind, string nl, string? tag = null)
     {
         var lines = new List<string>();
         var asyncKw = plan.Async ? "async " : "";
         var mapName = "Map" + char.ToUpperInvariant(verb[0]) + verb[1..].ToLowerInvariant();
-        lines.Add($"{ind}{receiver}.{mapName}({TextEdits.Literal(route)}, {asyncKw}({string.Join(", ", plan.Params.Select(p => RenderParam(p, EndpointStyle.MinimalApi)))}) =>");
+        lines.Add($"{ind}{receiver}.{mapName}({TextEdits.Literal(route)}, {asyncKw}({string.Join(", ", plan.Params.Select(p => RenderParam(p, EndpointStyle.MinimalApi, plan)))}) =>");
         lines.Add($"{ind}{{");
-        lines.AddRange(plan.Body.Select(b => $"{ind}    {RenderResult(b, EndpointStyle.MinimalApi)}"));
+        lines.AddRange(plan.Body.Select(b => $"{ind}    {RenderResult(b, EndpointStyle.MinimalApi, false)}"));
         lines.Add($"{ind}}})");
         lines.Add($"{ind}.WithName({TextEdits.Literal(name)})");
-        if (!string.IsNullOrWhiteSpace(summary) && model.FrameworkVersion is 0 or >= 7) lines.Add($"{ind}.WithSummary({TextEdits.Literal(summary.Trim())})");
+        if (tag is not null) lines.Add($"{ind}.WithTags({TextEdits.Literal(tag)})");
+        if (!string.IsNullOrWhiteSpace(summary) && model.SupportsWithSummary) lines.Add($"{ind}.WithSummary({TextEdits.Literal(summary.Trim())})");
         if (auth) lines.Add($"{ind}.RequireAuthorization()");
         lines[^1] += ";";
         return string.Join(nl, lines);
-    }
-
-    private static string HttpAttribute(string verb, string route)
-    {
-        var a = "Http" + char.ToUpperInvariant(verb[0]) + verb[1..].ToLowerInvariant();
-        return string.IsNullOrEmpty(route) ? a : $"{a}({TextEdits.Literal(route)})";
     }
 
     private static IEnumerable<string> DocLines(string summary, string ind)
@@ -305,6 +366,8 @@ public class EndpointWriter(HistoryService history)
         yield return $"{ind}/// </summary>";
     }
 
+    private static string AuthNamespace(ProjectModel model) => model.IsFramework ? "System.Web.Http" : "Microsoft.AspNetCore.Authorization";
+
     // ---------- Placement ----------
 
     private static void AddToController(ProjectModel model, GroupRecord group, HistoryService.ChangeSet changes, Plan plan, string verb, string route, string name, AddEndpointRequest req)
@@ -313,7 +376,7 @@ public class EndpointWriter(HistoryService history)
         var edits = new TextEdits(group.File.Text);
         var nl = edits.NewLine;
         var memberIndent = cls.Members.Count > 0 ? edits.IndentAt(cls.Members[0].SpanStart) : edits.IndentAt(cls.SpanStart) + "    ";
-        if (req.RequiresAuth && !group.ClassRequiresAuth) plan.Usings.Add("Microsoft.AspNetCore.Authorization");
+        if (req.RequiresAuth && !group.ClassRequiresAuth) plan.Usings.Add(AuthNamespace(model));
         var method = RenderControllerMethod(plan, verb, route, name, req.Summary, req.RequiresAuth && !group.ClassRequiresAuth, memberIndent, nl);
 
         var close = cls.CloseBraceToken.SpanStart;
@@ -324,6 +387,7 @@ public class EndpointWriter(HistoryService history)
 
         edits.AddUsings(group.File.Root, plan.Usings, ProjectAnalyzer.NamespaceOf(cls));
         Save(changes, group.File, edits);
+        if (model.IsFramework) EnsureAttributeRouting(model, changes);
     }
 
     private static void AddToMinimalGroup(ProjectModel model, GroupRecord group, HistoryService.ChangeSet changes, Plan plan, string verb, string route, string name, AddEndpointRequest req)
@@ -335,6 +399,7 @@ public class EndpointWriter(HistoryService history)
         var edits = new TextEdits(group.File.Text);
         var nl = edits.NewLine;
         var ind = edits.IndentAt(anchor.SpanStart);
+        plan.Usings.Remove("System"); plan.Usings.Remove("System.Linq"); plan.Usings.Remove("System.Threading.Tasks"); // minimal APIs always have implicit usings available
         var code = RenderMinimal(plan, model, group.Receiver!, verb, route, name, req.Summary, req.RequiresAuth && !group.ClassRequiresAuth, ind, nl);
         edits.Insert(anchor.Span.End, nl + nl + code);
         edits.AddUsings(group.File.Root, plan.Usings, ProjectAnalyzer.NamespaceOf(anchor));
@@ -345,14 +410,15 @@ public class EndpointWriter(HistoryService history)
     {
         var groupName = ValidateGroupName(ng.Name);
         var className = groupName.EndsWith("Controller") ? groupName : groupName + "Controller";
-        var path = Path.Combine(model.Directory, "Controllers", className + ".cs");
+        var relPath = Path.Combine("Controllers", className + ".cs");
+        var path = Path.Combine(model.Directory, relPath);
         if (File.Exists(path) || model.Groups.Any(g => g.Class?.Identifier.Text == className))
             throw new StudioException($"A group called \"{groupName}\" already exists.");
 
         const string nl = "\r\n";
         var ns = model.RootNamespace + ".Controllers";
-        if (req.RequiresAuth) plan.Usings.Add("Microsoft.AspNetCore.Authorization");
-        var fileScoped = model.FrameworkVersion is 0 or >= 6;
+        if (req.RequiresAuth) plan.Usings.Add(AuthNamespace(model));
+        var fileScoped = model.SupportsFileScopedNamespace;
         var ind = fileScoped ? "" : "    ";
         var method = RenderControllerMethod(plan, verb, route, name, req.Summary, req.RequiresAuth, ind + "    ", nl);
         var baseRoute = ProjectAnalyzer.NormalizeRoute(ng.BaseRoute).TrimStart('/');
@@ -362,16 +428,26 @@ public class EndpointWriter(HistoryService history)
         lines.Add("");
         if (fileScoped) { lines.Add($"namespace {ns};"); lines.Add(""); }
         else { lines.Add($"namespace {ns}"); lines.Add("{"); }
-        lines.Add($"{ind}[ApiController]");
-        lines.Add($"{ind}[Route({TextEdits.Literal(baseRoute)})]");
-        lines.Add($"{ind}public class {className} : ControllerBase");
+        if (model.IsFramework)
+        {
+            lines.Add($"{ind}[RoutePrefix({TextEdits.Literal(baseRoute)})]");
+            lines.Add($"{ind}public class {className} : ApiController");
+        }
+        else
+        {
+            lines.Add($"{ind}[ApiController]");
+            lines.Add($"{ind}[Route({TextEdits.Literal(baseRoute)})]");
+            lines.Add($"{ind}public class {className} : ControllerBase");
+        }
         lines.Add($"{ind}{{");
         lines.Add(method);
         lines.Add($"{ind}}}");
         if (!fileScoped) lines.Add("}");
         changes.Write(path, string.Join(nl, lines) + nl);
 
-        EnsureControllersRegistered(model, changes);
+        if (model.IsLegacyProject) AddCompileItem(model, changes, relPath);
+        if (model.IsFramework) EnsureAttributeRouting(model, changes);
+        else EnsureControllersRegistered(model, changes);
     }
 
     private void CreateMinimalGroup(ProjectModel model, NewGroupRequest ng, HistoryService.ChangeSet changes, Plan plan, string verb, string route, string name, AddEndpointRequest req)
@@ -383,30 +459,36 @@ public class EndpointWriter(HistoryService history)
 
         const string nl = "\r\n";
         var ns = model.RootNamespace + ".Endpoints";
-        var fileScoped = model.FrameworkVersion is 0 or >= 6;
-        var ind = fileScoped ? "" : "    ";
-        var code = RenderMinimal(plan, model, "group", verb, route, name, req.Summary, req.RequiresAuth, ind + "        ", nl);
+        var ind = "";
         var baseRoute = ProjectAnalyzer.NormalizeRoute(ng.BaseRoute);
         var tagName = ProjectAnalyzer.SplitWords(groupName);
+        plan.Usings.Remove("System"); plan.Usings.Remove("System.Linq"); plan.Usings.Remove("System.Threading.Tasks");
+
+        // MapGroup arrived in .NET 7; on .NET 6 each endpoint gets the full path and its own tag instead.
+        var code = model.SupportsMapGroup
+            ? RenderMinimal(plan, model, "group", verb, route, name, req.Summary, req.RequiresAuth, ind + "        ", nl)
+            : RenderMinimal(plan, model, "app", verb, ProjectAnalyzer.CombineRoutes(baseRoute, route), name, req.Summary, req.RequiresAuth, ind + "        ", nl, tagName);
 
         var usings = new HashSet<string>(plan.Usings) { "Microsoft.AspNetCore.Builder", "Microsoft.AspNetCore.Http", "Microsoft.AspNetCore.Routing" };
         var lines = new List<string>();
         lines.AddRange(usings.Where(u => !string.IsNullOrEmpty(u) && u != ns).Distinct().OrderBy(u => u).Select(u => $"using {u};"));
         lines.Add("");
-        if (fileScoped) { lines.Add($"namespace {ns};"); lines.Add(""); }
-        else { lines.Add($"namespace {ns}"); lines.Add("{"); }
+        lines.Add($"namespace {ns};");
+        lines.Add("");
         lines.Add($"{ind}public static class {className}");
         lines.Add($"{ind}{{");
         lines.Add($"{ind}    public static IEndpointRouteBuilder Map{className}(this IEndpointRouteBuilder app)");
         lines.Add($"{ind}    {{");
-        lines.Add($"{ind}        var group = app.MapGroup({TextEdits.Literal(baseRoute)}).WithTags({TextEdits.Literal(tagName)});");
-        lines.Add("");
+        if (model.SupportsMapGroup)
+        {
+            lines.Add($"{ind}        var group = app.MapGroup({TextEdits.Literal(baseRoute)}).WithTags({TextEdits.Literal(tagName)});");
+            lines.Add("");
+        }
         lines.Add(code);
         lines.Add("");
         lines.Add($"{ind}        return app;");
         lines.Add($"{ind}    }}");
         lines.Add($"{ind}}}");
-        if (!fileScoped) lines.Add("}");
         changes.Write(path, string.Join(nl, lines) + nl);
 
         // Register in Program.cs
@@ -426,8 +508,8 @@ public class EndpointWriter(HistoryService history)
     private static void EnsureControllersRegistered(ProjectModel model, HistoryService.ChangeSet changes)
     {
         var all = string.Concat(model.Files.Select(f => f.Text));
-        var needAdd = !all.Contains("AddControllers(") && !all.Contains("AddControllersWithViews(") && !all.Contains("AddMvc(");
-        var needMap = !all.Contains("MapControllers(") && !all.Contains("MapDefaultControllerRoute(") && !all.Contains("MapControllerRoute(");
+        var needAdd = !all.Contains("AddControllers(") && !all.Contains("AddControllersWithViews(") && !all.Contains("AddMvc(") && !all.Contains("AddMvcCore(");
+        var needMap = !all.Contains("MapControllers(") && !all.Contains("MapDefaultControllerRoute(") && !all.Contains("MapControllerRoute(") && !all.Contains("UseMvc(");
         if (!needAdd && !needMap) return;
         var program = model.ProgramFile ?? throw new StudioException("Couldn't find Program.cs to turn on controllers.");
         var edits = new TextEdits(changes.Read(program.Path));
@@ -437,7 +519,7 @@ public class EndpointWriter(HistoryService history)
             var build = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
                 .FirstOrDefault(i => i.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "Build" } m && m.Expression.ToString().Contains("builder", StringComparison.OrdinalIgnoreCase));
             var stmt = build?.Ancestors().OfType<StatementSyntax>().FirstOrDefault()
-                       ?? throw new StudioException("Couldn't find where services are configured in Program.cs.");
+                       ?? throw new StudioException("Couldn't find where services are configured, so controllers couldn't be turned on automatically.");
             var builderVar = ((MemberAccessExpressionSyntax)build.Expression).Expression.ToString();
             edits.Insert(edits.LineStart(stmt.SpanStart), $"{edits.IndentAt(stmt.SpanStart)}{builderVar}.Services.AddControllers();{edits.NewLine}{edits.NewLine}");
         }
@@ -450,6 +532,48 @@ public class EndpointWriter(HistoryService history)
         var updated = edits.Apply();
         TextEdits.EnsureStillValid(edits.Original, updated);
         changes.Write(program.Path, updated);
+    }
+
+    /// <summary>.NET Framework Web API 2: attribute routes only work after config.MapHttpAttributeRoutes().</summary>
+    private static void EnsureAttributeRouting(ProjectModel model, HistoryService.ChangeSet changes)
+    {
+        if (model.Files.Any(f => f.Text.Contains("MapHttpAttributeRoutes("))) return;
+        var file = model.Files.FirstOrDefault(f => f.Text.Contains("MapHttpRoute("))
+                   ?? throw new StudioException("Couldn't find the Web API route setup (WebApiConfig). Add config.MapHttpAttributeRoutes() to it so new endpoints can be reached.");
+        var edits = new TextEdits(changes.Read(file.Path));
+        var root = (CompilationUnitSyntax)CSharpSyntaxTree.ParseText(edits.Original, ProjectAnalyzer.ParseOptions).GetRoot();
+        var call = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .First(i => i.Expression is MemberAccessExpressionSyntax { Name.Identifier.Text: "MapHttpRoute" });
+        var stmt = call.Ancestors().OfType<StatementSyntax>().First();
+        // config.Routes.MapHttpRoute(...) → config
+        var configVar = call.Expression is MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: var cfg } } ? cfg.ToString() : "config";
+        edits.Insert(edits.LineStart(stmt.SpanStart), $"{edits.IndentAt(stmt.SpanStart)}{configVar}.MapHttpAttributeRoutes();{edits.NewLine}{edits.NewLine}");
+        var updated = edits.Apply();
+        TextEdits.EnsureStillValid(edits.Original, updated);
+        changes.Write(file.Path, updated);
+    }
+
+    /// <summary>Old-style project files list every source file; add the new one so it is compiled.</summary>
+    private static void AddCompileItem(ProjectModel model, HistoryService.ChangeSet changes, string relPath)
+    {
+        var text = changes.Read(model.CsprojPath);
+        var include = relPath.Replace('/', '\\');
+        if (text.Contains($"Include=\"{include}\"", StringComparison.OrdinalIgnoreCase)) return;
+        var nl = text.Contains("\r\n") ? "\r\n" : "\n";
+        var matches = Regex.Matches(text, @"^([ \t]*)<Compile\s+Include=""[^""]*""\s*/>[ \t]*\r?\n", RegexOptions.Multiline);
+        string updated;
+        if (matches.Count > 0)
+        {
+            var last = matches[^1];
+            updated = text.Insert(last.Index + last.Length, $"{last.Groups[1].Value}<Compile Include=\"{include}\" />{nl}");
+        }
+        else
+        {
+            var idx = text.LastIndexOf("</Project>", StringComparison.Ordinal);
+            if (idx < 0) throw new StudioException("The project file couldn't be updated with the new file.");
+            updated = text.Insert(idx, $"  <ItemGroup>{nl}    <Compile Include=\"{include}\" />{nl}  </ItemGroup>{nl}");
+        }
+        changes.Write(model.CsprojPath, updated);
     }
 
     private static StatementSyntax? FindRunStatement(CompilationUnitSyntax root) =>
@@ -480,14 +604,15 @@ public class EndpointWriter(HistoryService history)
 
         var changes = history.Begin(model.CsprojPath, $"Edited {rec.Info.HttpMethod} {rec.Info.Route}");
         var edits = new TextEdits(rec.File.Text);
-        if (rec.Info.Style == EndpointStyle.Controller) UpdateController(rec, edits, verb, route, name, req);
+        if (rec.Info.Style == EndpointStyle.Controller) UpdateController(model, rec, edits, verb, route, name, req);
         else UpdateMinimal(model, rec, edits, verb, route, name, req);
         Save(changes, rec.File, edits);
+        if (model.IsFramework && (verb != rec.Info.HttpMethod || route != rec.Info.RelativeRoute)) EnsureAttributeRouting(model, changes);
         changes.Commit();
         return $"{verb} {fullRoute} was updated.";
     }
 
-    private static void UpdateController(EndpointRecord rec, TextEdits edits, string verb, string route, string name, UpdateEndpointRequest req)
+    private static void UpdateController(ProjectModel model, EndpointRecord rec, TextEdits edits, string verb, string route, string name, UpdateEndpointRequest req)
     {
         var m = rec.Method!;
         var nl = edits.NewLine;
@@ -506,7 +631,7 @@ public class EndpointWriter(HistoryService history)
         }
 
         var attrLines = new List<string>();
-        if (routeChanged) attrLines.Add($"[{HttpAttribute(verb, route)}]");
+        if (routeChanged) attrLines.AddRange(RouteAttributes(model.IsFramework, verb, route));
         foreach (var list in m.AttributeLists)
         {
             var kept = list.Attributes.Where(a => !Managed(a)).ToList();
@@ -517,7 +642,7 @@ public class EndpointWriter(HistoryService history)
         {
             if (req.RequiresAuth && !classAuth) attrLines.Add("[Authorize]");
             if (!req.RequiresAuth && classAuth) attrLines.Add("[AllowAnonymous]");
-            if (req.RequiresAuth || classAuth) edits.AddUsings((CompilationUnitSyntax)rec.File.Root, ["Microsoft.AspNetCore.Authorization"], null);
+            if (req.RequiresAuth || classAuth) edits.AddUsings((CompilationUnitSyntax)rec.File.Root, [AuthNamespace(model)], null);
         }
 
         // Doc comment
@@ -606,7 +731,7 @@ public class EndpointWriter(HistoryService history)
         {
             var hasDescriptionOnly = rec.Chain.All(c => c.Name != "WithSummary") && rec.Chain.Any(c => c.Name == "WithDescription");
             if (hasDescriptionOnly) SetChainArg("WithDescription", req.Summary);
-            else if (model.FrameworkVersion is 0 or >= 7) SetChainArg("WithSummary", req.Summary);
+            else if (model.SupportsWithSummary) SetChainArg("WithSummary", req.Summary);
             else SetChainArg("WithDescription", req.Summary);
         }
 

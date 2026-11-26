@@ -1,6 +1,6 @@
 # Endpoint Studio
 
-A visual, no-code studio for **ASP.NET Core Web APIs**. Open any .NET project to browse, add, edit and delete its endpoints, or turn a SQL Server or MySQL database into a ready-to-run API in a few clicks. Users only ever see forms, lists and buttons. They never see code.
+A visual, no-code studio for **.NET Web APIs**, from **.NET Framework 4.x (ASP.NET Web API 2)** through **.NET Core** to **.NET 11**. Open any .NET project to browse, add, edit and delete its endpoints, or turn a SQL Server or MySQL database into a ready-to-run API in a few clicks. Users only ever see forms, lists and buttons. They never see code.
 
 ## Features
 
@@ -16,6 +16,7 @@ A visual, no-code studio for **ASP.NET Core Web APIs**. Open any .NET project to
 | **Run & try** | Starts the API on a free port, and a **Try it** panel sends real requests and explains the status codes |
 | **Export** | Downloads a Postman collection (v2.1) of every endpoint, with sample request bodies |
 | **New from database** | A four-step wizard: connect (SQL Server or MySQL) → pick a database → pick tables and operations → settings. It generates entities, a `DbContext`, CRUD endpoints (Controllers or Minimal APIs) and optional interactive API docs (Scalar), then runs a build check |
+| **Every .NET version** | Detects each project's .NET version and writes code that fits it (see the table below) |
 | **Look & feel** | Light, dark and system themes, and a responsive layout |
 
 ## How it works
@@ -34,10 +35,32 @@ React UI (Vite, TypeScript)  ──/api──▶  Local helper service (ASP.NET 
 * Changes are small, targeted text edits based on the syntax tree, so the rest of the file keeps its formatting. When needed, the studio also wires up `Program.cs`, for example `AddControllers()`/`MapControllers()` or registering a new endpoint group.
 * History backups are stored in `%LOCALAPPDATA%\EndpointStudio`, never inside your project.
 
+## .NET version support
+
+| Project type | Browse | Add / edit / delete | Build check | Run & try |
+| --- | --- | --- | --- | --- |
+| .NET Framework 4.x: ASP.NET Web API 2 (old-style or SDK project files, `packages.config`, EF6) | ✅ attribute routes (`[RoutePrefix]`/`[Route]`) and convention routes (`api/{controller}/{id}`) | ✅ controllers (`IHttpActionResult`, EF6 data endpoints); new files are added to the project file and attribute routing is switched on automatically | MSBuild (Visual Studio or Build Tools) | IIS Express |
+| .NET Core 2.x – 3.1, .NET 5 (`Startup` class) | ✅ | ✅ controllers | `dotnet build` | `dotnet run` (needs that runtime) |
+| .NET 6 | ✅ controllers and minimal APIs | ✅ minimal APIs without `MapGroup` (full paths per endpoint) | `dotnet build` | `dotnet run` |
+| .NET 7 – 11 | ✅ | ✅ everything, including `MapGroup` and `WithSummary` | `dotnet build` | `dotnet run` |
+
+Generated code follows each project's settings: nullable annotations only when `<Nullable>` is on, block or file-scoped namespaces, explicit `using`s when implicit usings are off, `JObject` instead of `JsonElement` before .NET Core 3, and `DateTime` instead of `DateOnly` on older versions. Out-of-support versions show a notice.
+
+**New projects from a database** can target **.NET 6, 7, 8, 9, 10** (and 11 when its SDK is installed), each with matching packages:
+
+| Target | EF Core (SQL Server) | Pomelo (MySQL) | API docs |
+| --- | --- | --- | --- |
+| .NET 6 / 7 | 7.0.20 | 7.0.0 | Swagger UI (Swashbuckle 6.9) |
+| .NET 8 | 8.0.34 | 8.0.3 | Swagger UI (Swashbuckle 6.9) |
+| .NET 9 | 9.0.23 | 9.0.0 | Built-in OpenAPI + Scalar 2.21 |
+| .NET 10 / 11 | 10.0.15 / 11.0.0 | 9.0.0 | Built-in OpenAPI + Scalar 3.2 |
+
 ## Requirements
 
-* [.NET SDK 10](https://dotnet.microsoft.com/download)
+* [.NET SDK 10](https://dotnet.microsoft.com/download) (runs the helper service and builds every .NET Core / .NET project)
 * Node.js 20+
+* Optional: Visual Studio or the Build Tools with IIS Express, to build and run .NET Framework projects
+* Optional: the ASP.NET Core runtime of each version you want to *run* (editing and building don't need it)
 
 ## Getting started
 

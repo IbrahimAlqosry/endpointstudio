@@ -54,11 +54,20 @@ app.UseStaticFiles();
 var api = app.MapGroup("/api");
 
 // ---------------------------------------------------------------- System
-api.MapGet("/system", async () =>
+api.MapGet("/system", async (DotnetService dotnet) =>
 {
-    var (_, version) = await DotnetService.RunProcessAsync("dotnet", ["--version"], Environment.CurrentDirectory, TimeSpan.FromSeconds(20));
+    var tc = await dotnet.GetToolchainAsync();
     var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-    return new { dotnetVersion = version.Trim(), defaultLocation = Directory.Exists(Path.Combine(docs, "source", "repos")) ? Path.Combine(docs, "source", "repos") : docs };
+    return new
+    {
+        dotnetVersion = tc.SdkVersion,
+        sdks = tc.SdkMajors,
+        runtimes = tc.AspNetRuntimeMajors,
+        hasVisualStudio = tc.MsBuildPath is not null,
+        hasIisExpress = tc.IisExpressPath is not null,
+        targets = await dotnet.TargetOptionsAsync(),
+        defaultLocation = Directory.Exists(Path.Combine(docs, "source", "repos")) ? Path.Combine(docs, "source", "repos") : docs,
+    };
 });
 
 // ---------------------------------------------------------------- File system
@@ -91,35 +100,35 @@ api.MapPost("/fs/open-editor", (PathBody body) =>
 api.MapGet("/projects/recent", (RecentProjectsStore store) => store.GetAll());
 api.MapDelete("/projects/recent", (string path, RecentProjectsStore store) => { store.Remove(path); return Results.Ok(); });
 
-api.MapGet("/project", (string path, RecentProjectsStore recent, HistoryService history) =>
+api.MapGet("/project", async (string path, RecentProjectsStore recent, HistoryService history, DotnetService dotnet) =>
 {
     var model = ProjectAnalyzer.Analyze(path);
     recent.Touch(model.CsprojPath, model.Name, model.Endpoints.Count);
-    return ToDetails(model, history);
+    return await ToDetails(model, history, dotnet);
 });
 
-api.MapPost("/project/endpoints", (string path, AddEndpointRequest req, EndpointWriter writer, HistoryService history) =>
+api.MapPost("/project/endpoints", async (string path, AddEndpointRequest req, EndpointWriter writer, HistoryService history, DotnetService dotnet) =>
 {
     var message = writer.Add(path, req);
-    return new { message, project = ToDetails(ProjectAnalyzer.Analyze(path), history) };
+    return new { message, project = await ToDetails(ProjectAnalyzer.Analyze(path), history, dotnet) };
 });
 
-api.MapPut("/project/endpoints/{id}", (string path, string id, UpdateEndpointRequest req, EndpointWriter writer, HistoryService history) =>
+api.MapPut("/project/endpoints/{id}", async (string path, string id, UpdateEndpointRequest req, EndpointWriter writer, HistoryService history, DotnetService dotnet) =>
 {
     var message = writer.Update(path, id, req);
-    return new { message, project = ToDetails(ProjectAnalyzer.Analyze(path), history) };
+    return new { message, project = await ToDetails(ProjectAnalyzer.Analyze(path), history, dotnet) };
 });
 
-api.MapDelete("/project/endpoints/{id}", (string path, string id, EndpointWriter writer, HistoryService history) =>
+api.MapDelete("/project/endpoints/{id}", async (string path, string id, EndpointWriter writer, HistoryService history, DotnetService dotnet) =>
 {
     var message = writer.Delete(path, id);
-    return new { message, project = ToDetails(ProjectAnalyzer.Analyze(path), history) };
+    return new { message, project = await ToDetails(ProjectAnalyzer.Analyze(path), history, dotnet) };
 });
 
-api.MapPost("/project/undo", (string path, HistoryService history) =>
+api.MapPost("/project/undo", async (string path, HistoryService history, DotnetService dotnet) =>
 {
     var what = history.UndoLast(path);
-    return new { message = $"Undone: {what}", project = ToDetails(ProjectAnalyzer.Analyze(path), history) };
+    return new { message = $"Undone: {what}", project = await ToDetails(ProjectAnalyzer.Analyze(path), history, dotnet) };
 });
 
 api.MapPost("/project/build", (string path, DotnetService dotnet, CancellationToken ct) => dotnet.BuildAsync(path, ct));
@@ -161,11 +170,12 @@ app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<
 app.Logger.LogInformation("Endpoint Studio server ready.");
 app.Run();
 
-static ProjectDetails ToDetails(ProjectModel m, HistoryService history) => new(
+static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService history, DotnetService dotnet) => new(
     m.Name,
     m.CsprojPath,
     m.Directory,
     m.TargetFramework,
+    await dotnet.CapabilitiesAsync(m),
     m.RootNamespace,
     m.PreferredStyle,
     m.Endpoints.Select(e => e.Info).ToList(),

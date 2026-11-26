@@ -11,7 +11,10 @@ export function HomePage({ recent, onOpen, onForget }: { recent: RecentProject[]
           <span className="badge accent"><Icon name="sparkles" size={13} /> No code needed</span>
         </div>
         <h1>Design your .NET APIs visually</h1>
-        <p>Open any ASP.NET Core project to browse, add, edit and remove endpoints, or turn a database into a ready-to-run API in a few clicks.</p>
+        <p>Open any .NET API project to browse, add, edit and remove endpoints, or turn a database into a ready-to-run API in a few clicks.</p>
+        <div className="row wrap gap-6 mt-16">
+          {['.NET Framework 4.x', '.NET Core 2.x–3.1', '.NET 5', '.NET 6', '.NET 7', '.NET 8', '.NET 9', '.NET 10', '.NET 11'].map(v => <span key={v} className="badge">{v}</span>)}
+        </div>
         <div className="row wrap mt-24">
           <Button variant="primary" size="lg" icon="folderOpen" onClick={onOpen}>Open a project</Button>
           <Button size="lg" icon="database" onClick={() => navigate({ page: 'new' })}>Create from a database</Button>

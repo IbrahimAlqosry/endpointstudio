@@ -9,7 +9,7 @@ using EndpointStudio.Server.Models;
 
 namespace EndpointStudio.Server.Services;
 
-/// <summary>Builds projects, runs them and sends test requests to them.</summary>
+/// <summary>Knows which .NET tools are installed, builds and runs projects, and sends test requests to them.</summary>
 public class DotnetService : IDisposable
 {
     private static readonly Regex IssueRx = new(@"^\s*(?<file>[^\s].*?)\((?<line>\d+),\d+\): (?<kind>error|warning) (?<code>[A-Z]+\d+): (?<msg>.*?)(?: \[[^\]]+\])?$", RegexOptions.Compiled);
@@ -18,6 +18,110 @@ public class DotnetService : IDisposable
     {
         Timeout = TimeSpan.FromSeconds(60),
     };
+    private Toolchain? _toolchain;
+    private readonly SemaphoreSlim _toolchainLock = new(1, 1);
+
+    // ------------------------------------------------------------------ Toolchain
+
+    public sealed record Toolchain(List<int> SdkMajors, List<int> AspNetRuntimeMajors, string? MsBuildPath, string? IisExpressPath, string SdkVersion);
+
+    public async Task<Toolchain> GetToolchainAsync()
+    {
+        if (_toolchain is not null) return _toolchain;
+        await _toolchainLock.WaitAsync();
+        try
+        {
+            if (_toolchain is not null) return _toolchain;
+            var dir = Environment.CurrentDirectory;
+            var (_, sdks) = await RunProcessAsync("dotnet", ["--list-sdks"], dir, TimeSpan.FromSeconds(30));
+            var (_, runtimes) = await RunProcessAsync("dotnet", ["--list-runtimes"], dir, TimeSpan.FromSeconds(30));
+            var (_, version) = await RunProcessAsync("dotnet", ["--version"], dir, TimeSpan.FromSeconds(30));
+            var sdkMajors = Regex.Matches(sdks, @"^(\d+)\.", RegexOptions.Multiline).Select(m => int.Parse(m.Groups[1].Value)).Distinct().OrderBy(x => x).ToList();
+            var rtMajors = Regex.Matches(runtimes, @"^Microsoft\.AspNetCore\.App (\d+)\.", RegexOptions.Multiline).Select(m => int.Parse(m.Groups[1].Value)).Distinct().OrderBy(x => x).ToList();
+            _toolchain = new Toolchain(sdkMajors, rtMajors, await FindMsBuildAsync(), FindIisExpress(), version.Trim());
+            return _toolchain;
+        }
+        finally { _toolchainLock.Release(); }
+    }
+
+    private static async Task<string?> FindMsBuildAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
+        if (!File.Exists(vswhere)) return null;
+        try
+        {
+            var (_, output) = await RunProcessAsync(vswhere, ["-latest", "-products", "*", "-requires", "Microsoft.Component.MSBuild", "-find", @"MSBuild\**\Bin\MSBuild.exe"], Environment.CurrentDirectory, TimeSpan.FromSeconds(30));
+            return output.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.EndsWith("MSBuild.exe", StringComparison.OrdinalIgnoreCase) && File.Exists(l));
+        }
+        catch { return null; }
+    }
+
+    private static string? FindIisExpress()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        foreach (var root in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 })
+        {
+            var p = Path.Combine(Environment.GetFolderPath(root), "IIS Express", "iisexpress.exe");
+            if (File.Exists(p)) return p;
+        }
+        return null;
+    }
+
+    /// <summary>What the studio can do with a project, given the tools installed on this computer.</summary>
+    public async Task<ProjectCapabilities> CapabilitiesAsync(ProjectModel m)
+    {
+        var tc = await GetToolchainAsync();
+        if (m.IsFramework)
+        {
+            var canBuild = tc.MsBuildPath is not null;
+            var canRun = canBuild && tc.IisExpressPath is not null;
+            var outOfSupport = Regex.IsMatch(m.FrameworkLabel, @"4\.(0|5|5\.1|5\.2|6|6\.1)$");
+            return new ProjectCapabilities(
+                "NetFramework", m.FrameworkLabel, false, false, canBuild, canRun,
+                canBuild ? null : "Building .NET Framework projects needs Visual Studio or the Visual Studio Build Tools.",
+                canRun ? null : tc.MsBuildPath is null ? "Running .NET Framework projects needs Visual Studio (with IIS Express)." : "Running .NET Framework projects needs IIS Express, which comes with Visual Studio.",
+                outOfSupport ? $"{m.FrameworkLabel} is no longer supported by Microsoft. Consider moving to .NET Framework 4.8." : null);
+        }
+
+        var major = m.FrameworkVersion;
+        var buildOk = major == 0 || tc.SdkMajors.Any(s => s >= major);
+        var runOk = major == 0 || tc.AspNetRuntimeMajors.Contains(major);
+        string? support = major switch
+        {
+            0 => null,
+            < 8 => $"{m.FrameworkLabel} is no longer supported by Microsoft and doesn't get security fixes. Consider upgrading.",
+            8 or 9 => $"{m.FrameworkLabel} reached end of support in November 2026. Consider upgrading to .NET 10 (LTS).",
+            _ => null,
+        };
+        return new ProjectCapabilities(
+            "NetCore", m.FrameworkLabel, m.SupportsMinimalApis, true, buildOk, runOk,
+            buildOk ? null : $"This project needs the .NET {major} SDK (or newer) to build. Installed: {string.Join(", ", tc.SdkMajors.Select(s => $".NET {s}"))}.",
+            runOk ? null : $"Running this project needs the ASP.NET Core {major} runtime, which isn't installed. You can still edit and build it.",
+            support);
+    }
+
+    /// <summary>Versions a new project can target with the installed SDKs.</summary>
+    public async Task<List<TargetOption>> TargetOptionsAsync()
+    {
+        var tc = await GetToolchainAsync();
+        var maxSdk = tc.SdkMajors.DefaultIfEmpty(0).Max();
+        var list = new List<TargetOption>();
+        foreach (var major in Codegen.ProjectGenerator.SupportedTargets.Keys.OrderByDescending(x => x))
+        {
+            if (major > maxSdk) continue;
+            var support = major switch
+            {
+                10 => "LTS · supported until Nov 2028",
+                11 => "STS · supported until Nov 2027",
+                8 or 9 => "Support ended Nov 2026",
+                _ => "Out of support",
+            };
+            list.Add(new TargetOption($"net{major}.0", major, $".NET {major}", support, true, tc.AspNetRuntimeMajors.Contains(major), false));
+        }
+        var recommended = list.FirstOrDefault(t => t.Major == 10) ?? list.FirstOrDefault();
+        return list.Select(t => t == recommended ? t with { Recommended = true } : t).ToList();
+    }
 
     // ------------------------------------------------------------------ Build
 
@@ -26,8 +130,35 @@ public class DotnetService : IDisposable
         if (IsRunning(csproj))
             throw new StudioException("Stop the running app before checking the build.");
         var sw = Stopwatch.StartNew();
-        var (exit, output) = await RunProcessAsync("dotnet", ["build", csproj, "-nologo", "-clp:NoSummary", "-v", "q"], Path.GetDirectoryName(csproj)!, TimeSpan.FromMinutes(5), ct);
-        return ParseBuild(exit, output, sw.ElapsedMilliseconds, Path.GetDirectoryName(csproj)!);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(csproj))!;
+        var (exit, output) = await BuildProcessAsync(csproj, line => { }, ct);
+        return ParseBuild(exit, output, sw.ElapsedMilliseconds, dir);
+    }
+
+    private async Task<(int Exit, string Output)> BuildProcessAsync(string csproj, Action<string> log, CancellationToken ct)
+    {
+        var (platform, _, legacy) = ProjectAnalyzer.Peek(csproj);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(csproj))!;
+        if (platform == ProjectPlatform.NetFramework || legacy)
+        {
+            var tc = await GetToolchainAsync();
+            var msbuild = tc.MsBuildPath ?? throw new StudioException("Building .NET Framework projects needs Visual Studio or the Visual Studio Build Tools, which weren't found on this computer.");
+            log("Building with MSBuild (Visual Studio)…");
+            return await RunProcessAsync(msbuild,
+                [csproj, "-restore", "-p:RestorePackagesConfig=true", $"-p:SolutionDir={SolutionDirFor(dir)}", "-p:Configuration=Debug", "-nologo", "-v:m", "-clp:NoSummary"],
+                dir, TimeSpan.FromMinutes(8), ct);
+        }
+        log("Building with the .NET SDK…");
+        return await RunProcessAsync("dotnet", ["build", csproj, "-nologo", "-clp:NoSummary", "-v", "q"], dir, TimeSpan.FromMinutes(5), ct);
+    }
+
+    /// <summary>Package restore for old projects puts packages next to the solution file.</summary>
+    private static string SolutionDirFor(string projectDir)
+    {
+        var d = new DirectoryInfo(projectDir);
+        for (var i = 0; i < 4 && d is not null; i++, d = d.Parent)
+            if (d.EnumerateFiles("*.sln").Any() || d.EnumerateFiles("*.slnx").Any()) return d.FullName.TrimEnd('\\') + "\\";
+        return (Directory.GetParent(projectDir)?.FullName ?? projectDir).TrimEnd('\\') + "\\";
     }
 
     private static BuildResult ParseBuild(int exit, string output, long ms, string projectDir)
@@ -45,7 +176,7 @@ public class DotnetService : IDisposable
                     var idx = line.IndexOf(": error ", StringComparison.Ordinal);
                     var rest = Regex.Replace(line[(idx + 8)..], @" \[[^\]]+\]$", "");
                     var codeEnd = rest.IndexOf(':');
-                    errors.Add(new BuildIssue(null, null, codeEnd > 0 ? rest[..codeEnd] : "", codeEnd > 0 ? rest[(codeEnd + 1)..].Trim() : rest));
+                    errors.Add(new BuildIssue(null, null, codeEnd > 0 ? rest[..codeEnd] : "", FriendlyBuildMessage(codeEnd > 0 ? rest[(codeEnd + 1)..].Trim() : rest)));
                 }
                 continue;
             }
@@ -58,85 +189,145 @@ public class DotnetService : IDisposable
         if (exit != 0 && errors.Count == 0)
         {
             var tail = string.Join("\n", output.Split('\n').Where(l => l.Trim().Length > 0).TakeLast(6));
-            errors.Add(new BuildIssue(null, null, "BUILD", string.IsNullOrWhiteSpace(tail) ? "The build failed." : tail));
+            errors.Add(new BuildIssue(null, null, "BUILD", string.IsNullOrWhiteSpace(tail) ? "The build failed." : FriendlyBuildMessage(tail)));
         }
         return new BuildResult(exit == 0, errors.Count, warnings.Count, errors, ms);
+    }
+
+    private static string FriendlyBuildMessage(string msg)
+    {
+        var m = Regex.Match(msg, @"NETSDK1045: The current \.NET SDK does not support targeting \.NET (\d+\.\d+)");
+        if (m.Success) return $"This project needs a newer .NET SDK (version {m.Groups[1].Value}) to build. Install it from dot.net.";
+        if (msg.Contains("NU1101") || msg.Contains("NU1301")) return "Some packages couldn't be downloaded. Check your internet connection and try again.";
+        if (msg.Contains("MSB4019") && msg.Contains("WebApplication.targets"))
+            return "The ASP.NET web build tools are missing. Install the \"ASP.NET and web development\" workload in Visual Studio.";
+        return msg;
     }
 
     // ------------------------------------------------------------------ Run
 
     private sealed class RunningApp
     {
-        public required Process Process { get; init; }
+        public Process? Process { get; set; }
         public required string Url { get; init; }
         public string State { get; set; } = "starting";
+        public CancellationTokenSource Cancel { get; } = new();
         public ConcurrentQueue<string> Log { get; } = new();
+        public bool Exited => Process is null ? State is "failed" or "stopped" : Process.HasExited;
         public void Append(string line)
         {
             Log.Enqueue(line);
-            while (Log.Count > 300) Log.TryDequeue(out _);
+            while (Log.Count > 400) Log.TryDequeue(out _);
         }
     }
 
     public bool IsRunning(string csproj) =>
-        _running.TryGetValue(Path.GetFullPath(csproj), out var app) && !app.Process.HasExited;
+        _running.TryGetValue(Path.GetFullPath(csproj), out var app) && !app.Exited;
 
     public RunStatus Status(string csproj)
     {
         if (!_running.TryGetValue(Path.GetFullPath(csproj), out var app))
             return new RunStatus(false, null, "stopped", []);
-        if (app.Process.HasExited && app.State is "starting" or "running")
+        if (app.Process is { HasExited: true } && app.State is "starting" or "running")
             app.State = app.State == "starting" ? "failed" : "stopped";
-        return new RunStatus(!app.Process.HasExited, app.Url, app.State, app.Log.ToList());
+        return new RunStatus(!app.Exited, app.Url, app.State, app.Log.ToList());
     }
 
     public RunStatus Start(string csproj)
     {
         var key = Path.GetFullPath(csproj);
-        if (_running.TryGetValue(key, out var existing) && !existing.Process.HasExited) return Status(csproj);
+        if (_running.TryGetValue(key, out var existing) && !existing.Exited) return Status(csproj);
 
         var port = FreePort();
-        var url = $"http://localhost:{port}";
-        var psi = new ProcessStartInfo("dotnet")
+        var app = new RunningApp { Url = $"http://localhost:{port}" };
+        _running[key] = app;
+        var (platform, _, legacy) = ProjectAnalyzer.Peek(key);
+        if (platform == ProjectPlatform.NetFramework || legacy) _ = Task.Run(() => StartFrameworkAsync(key, app, port));
+        else StartCore(key, app);
+        return Status(csproj);
+    }
+
+    private void StartCore(string csproj, RunningApp app)
+    {
+        var psi = NewPsi("dotnet", Path.GetDirectoryName(csproj)!, ["run", "--project", csproj, "--no-launch-profile", "--urls", app.Url]);
+        psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
+        app.Append("Building and starting the app…");
+        Launch(app, psi, line => line.Contains("Now listening on") || line.Contains("Application started"));
+    }
+
+    private async Task StartFrameworkAsync(string csproj, RunningApp app, int port)
+    {
+        try
         {
-            WorkingDirectory = Path.GetDirectoryName(key)!,
+            var tc = await GetToolchainAsync();
+            if (tc.IisExpressPath is null) throw new StudioException("Running .NET Framework projects needs IIS Express, which comes with Visual Studio.");
+            var (exit, output) = await BuildProcessAsync(csproj, app.Append, app.Cancel.Token);
+            if (exit != 0)
+            {
+                foreach (var l in output.Split('\n').Where(l => l.Contains(": error ")).Take(10)) app.Append(l.Trim());
+                app.Append("The app couldn't be built. Use “Check build” to see the problems.");
+                app.State = "failed";
+                return;
+            }
+            if (app.State == "stopped") return;
+            app.Append("Starting IIS Express…");
+            var psi = NewPsi(tc.IisExpressPath, Path.GetDirectoryName(csproj)!, [$"/path:{Path.GetDirectoryName(csproj)}", $"/port:{port}", "/systray:false"]);
+            Launch(app, psi, line => line.Contains("IIS Express is running", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (StudioException ex) { app.Append(ex.Message); app.State = "failed"; }
+        catch (OperationCanceledException) { app.State = "stopped"; }
+        catch (Exception ex) { app.Append("The app couldn't start: " + ex.Message); app.State = "failed"; }
+    }
+
+    private static ProcessStartInfo NewPsi(string file, string workDir, IEnumerable<string> args)
+    {
+        var psi = new ProcessStartInfo(file)
+        {
+            WorkingDirectory = workDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        foreach (var a in new[] { "run", "--project", key, "--no-launch-profile", "--urls", url }) psi.ArgumentList.Add(a);
-        psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
+        foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+        psi.Environment["DOTNET_NOLOGO"] = "1";
+        return psi;
+    }
 
+    private static void Launch(RunningApp app, ProcessStartInfo psi, Func<string, bool> isReady)
+    {
         var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        var app = new RunningApp { Process = proc, Url = url };
-        app.Append("Building and starting the app…");
         proc.OutputDataReceived += (_, e) =>
         {
             if (e.Data is null) return;
             app.Append(e.Data);
-            if (e.Data.Contains("Now listening on") || e.Data.Contains("Application started")) app.State = "running";
+            if (isReady(e.Data)) app.State = "running";
         };
         proc.ErrorDataReceived += (_, e) => { if (e.Data is not null) app.Append(e.Data); };
         proc.Exited += (_, _) =>
         {
-            app.Append(app.State == "running" ? "The app stopped." : "The app couldn't start. See the messages above.");
+            var log = string.Join("\n", app.Log);
+            var missing = Regex.Match(log, @"Framework: 'Microsoft\.(?:AspNetCore|NETCore)\.App', version '(\d+)\.");
+            if (app.State != "running" && missing.Success)
+                app.Append($"This app needs the .NET {missing.Groups[1].Value} runtime, which isn't installed. Install the ASP.NET Core {missing.Groups[1].Value} Runtime from dot.net to run it.");
+            else
+                app.Append(app.State == "running" || app.State == "stopping" ? "The app stopped." : "The app couldn't start. See the messages above.");
             app.State = app.State == "running" || app.State == "stopping" ? "stopped" : "failed";
         };
         proc.Start();
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
-        _running[key] = app;
-        return Status(csproj);
+        app.Process = proc;
     }
 
     public RunStatus Stop(string csproj)
     {
-        if (_running.TryGetValue(Path.GetFullPath(csproj), out var app) && !app.Process.HasExited)
+        if (_running.TryGetValue(Path.GetFullPath(csproj), out var app) && !app.Exited)
         {
             app.State = "stopping";
-            try { app.Process.Kill(entireProcessTree: true); app.Process.WaitForExit(5000); } catch { /* already gone */ }
+            app.Cancel.Cancel();
+            try { if (app.Process is { HasExited: false } p) { p.Kill(entireProcessTree: true); p.WaitForExit(5000); } } catch { /* already gone */ }
             app.State = "stopped";
         }
         return Status(csproj);
@@ -144,7 +335,7 @@ public class DotnetService : IDisposable
 
     public async Task<TryResponse> TryAsync(string csproj, TryRequest req, CancellationToken ct)
     {
-        if (!_running.TryGetValue(Path.GetFullPath(csproj), out var app) || app.Process.HasExited || app.State != "running")
+        if (!_running.TryGetValue(Path.GetFullPath(csproj), out var app) || app.Exited || app.State != "running")
             throw new StudioException("Start the app first, then try the endpoint.");
 
         var path = req.Path.StartsWith('/') ? req.Path : "/" + req.Path;
@@ -182,18 +373,7 @@ public class DotnetService : IDisposable
 
     public static async Task<(int Exit, string Output)> RunProcessAsync(string file, IEnumerable<string> args, string workDir, TimeSpan timeout, CancellationToken ct = default)
     {
-        var psi = new ProcessStartInfo(file)
-        {
-            WorkingDirectory = workDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        foreach (var a in args) psi.ArgumentList.Add(a);
-        psi.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
-        psi.Environment["DOTNET_NOLOGO"] = "1";
-        using var p = Process.Start(psi) ?? throw new StudioException($"Couldn't start {file}.");
+        using var p = Process.Start(NewPsi(file, workDir, args)) ?? throw new StudioException($"Couldn't start {file}.");
         var stdout = p.StandardOutput.ReadToEndAsync(ct);
         var stderr = p.StandardError.ReadToEndAsync(ct);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -219,7 +399,7 @@ public class DotnetService : IDisposable
     public void Dispose()
     {
         foreach (var app in _running.Values)
-            try { if (!app.Process.HasExited) app.Process.Kill(true); } catch { /* ignore */ }
+            try { app.Cancel.Cancel(); if (app.Process is { HasExited: false } p) p.Kill(true); } catch { /* ignore */ }
         _http.Dispose();
     }
 }

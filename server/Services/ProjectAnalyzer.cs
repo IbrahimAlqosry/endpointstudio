@@ -57,6 +57,26 @@ public class ProjectModel
     public List<string> Warnings { get; } = [];
     public bool IsWebProject { get; set; }
 
+    /// <summary>.NET Framework (ASP.NET Web API 2) or modern .NET / .NET Core.</summary>
+    public required ProjectPlatform Platform { get; init; }
+    /// <summary>Major version: 4 for .NET Framework 4.x, 3 for .NET Core 3.1, 8 for .NET 8…</summary>
+    public required int FrameworkVersion { get; init; }
+    public required string FrameworkLabel { get; init; }
+    public bool NullableEnabled { get; init; }
+    public bool ImplicitUsings { get; init; }
+    /// <summary>Old-style (non-SDK) project file that lists every source file.</summary>
+    public bool IsLegacyProject { get; init; }
+    /// <summary>Entity Framework 6 (classic) rather than EF Core.</summary>
+    public bool UsesEf6 => Packages.Any(p => p.Equals("EntityFramework", StringComparison.OrdinalIgnoreCase));
+
+    public bool IsFramework => Platform == ProjectPlatform.NetFramework;
+    // An unknown version (0) is treated as a modern project.
+    private bool AtLeast(int major) => !IsFramework && (FrameworkVersion == 0 || FrameworkVersion >= major);
+    public bool SupportsMinimalApis => AtLeast(6);
+    public bool SupportsMapGroup => AtLeast(7);
+    public bool SupportsFileScopedNamespace => AtLeast(6);
+    public bool SupportsWithSummary => AtLeast(7);
+
     public EndpointStyle PreferredStyle =>
         Groups.Any(g => g.Style == EndpointStyle.Controller) ? EndpointStyle.Controller :
         Groups.Any(g => g.Style == EndpointStyle.MinimalApi) ? EndpointStyle.MinimalApi :
@@ -65,17 +85,9 @@ public class ProjectModel
     public SourceFile? ProgramFile =>
         Files.FirstOrDefault(f => System.IO.Path.GetFileName(f.Path).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
         ?? Files.FirstOrDefault(f => f.Text.Contains("WebApplication.CreateBuilder"));
-
-    /// <summary>Framework major version, e.g. 8 for net8.0 (0 if unknown).</summary>
-    public int FrameworkVersion
-    {
-        get
-        {
-            var m = Regex.Match(TargetFramework, @"net(\d+)\.");
-            return m.Success ? int.Parse(m.Groups[1].Value) : 0;
-        }
-    }
 }
+
+public enum ProjectPlatform { NetCore, NetFramework }
 
 public static class ProjectAnalyzer
 {
@@ -119,12 +131,28 @@ public static class ProjectAnalyzer
         var props = doc.Descendants().Where(e => e.Parent?.Name.LocalName == "PropertyGroup").ToList();
         string? Prop(string n) => props.FirstOrDefault(e => e.Name.LocalName == n)?.Value.Trim();
 
-        var tfm = Prop("TargetFramework") ?? Prop("TargetFrameworks")?.Split(';').FirstOrDefault() ?? "unknown";
+        var sdk = (string?)doc.Root?.Attribute("Sdk") ?? "";
+        var legacy = sdk.Length == 0 && doc.Root?.Elements().All(e => e.Name.LocalName != "Sdk") == true;
+        var tfm = Prop("TargetFramework") ?? Prop("TargetFrameworks")?.Split(';').FirstOrDefault()
+                  ?? (Prop("TargetFrameworkVersion") is { } tfv ? "net" + tfv.TrimStart('v').Replace(".", "") : "unknown");
+        var (platform, major, label) = DescribeFramework(tfm);
         var rootNs = Prop("RootNamespace") ?? Regex.Replace(name, @"[^A-Za-z0-9_.]", "_");
         var packages = doc.Descendants().Where(e => e.Name.LocalName == "PackageReference")
             .Select(e => (string?)e.Attribute("Include") ?? (string?)e.Attribute("Update") ?? "")
             .Where(s => s.Length > 0).ToList();
-        var sdk = (string?)doc.Root?.Attribute("Sdk") ?? "";
+        var packagesConfig = Path.Combine(dir, "packages.config");
+        if (File.Exists(packagesConfig))
+        {
+            try
+            {
+                packages.AddRange(XDocument.Load(packagesConfig).Descendants("package")
+                    .Select(e => (string?)e.Attribute("id") ?? "").Where(s => s.Length > 0));
+            }
+            catch { /* ignore a broken packages.config */ }
+        }
+        var references = doc.Descendants().Where(e => e.Name.LocalName == "Reference")
+            .Select(e => ((string?)e.Attribute("Include") ?? "").Split(',')[0].Trim()).ToList();
+        var projectTypes = Prop("ProjectTypeGuids") ?? "";
 
         var model = new ProjectModel
         {
@@ -135,8 +163,17 @@ public static class ProjectAnalyzer
             RootNamespace = rootNs,
             Packages = packages,
             Files = LoadSources(dir),
+            Platform = platform,
+            FrameworkVersion = major,
+            FrameworkLabel = label,
+            NullableEnabled = string.Equals(Prop("Nullable"), "enable", StringComparison.OrdinalIgnoreCase),
+            ImplicitUsings = string.Equals(Prop("ImplicitUsings"), "enable", StringComparison.OrdinalIgnoreCase) || string.Equals(Prop("ImplicitUsings"), "true", StringComparison.OrdinalIgnoreCase),
+            IsLegacyProject = legacy,
             IsWebProject = sdk.Contains("Web", StringComparison.OrdinalIgnoreCase)
-                           || doc.Descendants().Any(e => e.Name.LocalName == "FrameworkReference" && ((string?)e.Attribute("Include"))?.Contains("AspNetCore") == true),
+                           || doc.Descendants().Any(e => e.Name.LocalName == "FrameworkReference" && ((string?)e.Attribute("Include"))?.Contains("AspNetCore") == true)
+                           || projectTypes.Contains("349C5851-65DF-11DA-9384-00065B846F21", StringComparison.OrdinalIgnoreCase)
+                           || references.Contains("System.Web.Http") || packages.Any(p => p.StartsWith("Microsoft.AspNet.WebApi", StringComparison.OrdinalIgnoreCase))
+                           || packages.Any(p => p.StartsWith("Microsoft.AspNetCore", StringComparison.OrdinalIgnoreCase)),
         };
 
         if (!model.IsWebProject)
@@ -149,6 +186,44 @@ public static class ProjectAnalyzer
         }
         FindEntities(model);
         return model;
+    }
+
+    /// <summary>Turns a target framework moniker into a platform, major version and friendly label.</summary>
+    public static (ProjectPlatform Platform, int Major, string Label) DescribeFramework(string tfm)
+    {
+        var t = tfm.Trim().ToLowerInvariant();
+        var m = Regex.Match(t, @"^net(\d)(\d)(\d)?$"); // net48, net472, net461
+        if (m.Success)
+        {
+            var label = $".NET Framework {m.Groups[1].Value}.{m.Groups[2].Value}" + (m.Groups[3].Success ? $".{m.Groups[3].Value}" : "");
+            return (ProjectPlatform.NetFramework, int.Parse(m.Groups[1].Value), label);
+        }
+        m = Regex.Match(t, @"^netcoreapp(\d+)\.(\d+)");
+        if (m.Success) return (ProjectPlatform.NetCore, int.Parse(m.Groups[1].Value), $".NET Core {m.Groups[1].Value}.{m.Groups[2].Value}");
+        m = Regex.Match(t, @"^net(\d+)\.(\d+)");
+        if (m.Success)
+        {
+            var major = int.Parse(m.Groups[1].Value);
+            return (ProjectPlatform.NetCore, major, $".NET {major}" + (m.Groups[2].Value != "0" ? $".{m.Groups[2].Value}" : ""));
+        }
+        if (t.StartsWith("netstandard")) return (ProjectPlatform.NetCore, 0, ".NET Standard");
+        return (ProjectPlatform.NetCore, 0, tfm);
+    }
+
+    /// <summary>Quick look at a project file (no source parsing) to know which build tools it needs.</summary>
+    public static (ProjectPlatform Platform, int Major, bool Legacy) Peek(string csprojPath)
+    {
+        try
+        {
+            var doc = XDocument.Load(csprojPath);
+            string? Prop(string n) => doc.Descendants().FirstOrDefault(e => e.Name.LocalName == n && e.Parent?.Name.LocalName == "PropertyGroup")?.Value.Trim();
+            var legacy = doc.Root?.Attribute("Sdk") is null && doc.Root?.Elements().All(e => e.Name.LocalName != "Sdk") == true;
+            var tfm = Prop("TargetFramework") ?? Prop("TargetFrameworks")?.Split(';').FirstOrDefault()
+                      ?? (Prop("TargetFrameworkVersion") is { } tfv ? "net" + tfv.TrimStart('v').Replace(".", "") : "");
+            var (p, major, _) = DescribeFramework(tfm);
+            return (p, major, legacy);
+        }
+        catch { return (ProjectPlatform.NetCore, 0, false); }
     }
 
     private static List<SourceFile> LoadSources(string projectDir)
@@ -190,13 +265,15 @@ public static class ProjectAnalyzer
         {
             if (cls.Modifiers.Any(SyntaxKind.AbstractKeyword) || cls.Modifiers.Any(SyntaxKind.StaticKeyword)) continue;
             var baseNames = cls.BaseList?.Types.Select(t => SimpleName(t.Type)).ToList() ?? [];
-            var isController = HasAttribute(cls.AttributeLists, "ApiController")
-                               || baseNames.Any(b => b.EndsWith("Controller") || b.EndsWith("ControllerBase"));
+            var isController = model.IsFramework
+                ? baseNames.Any(b => b.EndsWith("ApiController")) // Web API 2 (MVC view controllers are skipped)
+                : HasAttribute(cls.AttributeLists, "ApiController") || baseNames.Any(b => b.EndsWith("Controller") || b.EndsWith("ControllerBase"));
             if (!isController) continue;
 
             var controllerName = cls.Identifier.Text.EndsWith("Controller") && cls.Identifier.Text.Length > 10
                 ? cls.Identifier.Text[..^10] : cls.Identifier.Text;
-            var classRoute = GetAttributes(cls.AttributeLists, "Route").Select(FirstStringArg).FirstOrDefault(s => s is not null) ?? "";
+            var classRoute = GetAttributes(cls.AttributeLists, "Route").Concat(GetAttributes(cls.AttributeLists, "RoutePrefix"))
+                .Select(FirstStringArg).FirstOrDefault(s => s is not null) ?? "";
             var baseRoute = NormalizeRoute(ReplaceTokens(classRoute, controllerName, null));
             var classAuth = HasAttribute(cls.AttributeLists, "Authorize");
 
@@ -226,16 +303,30 @@ public static class ProjectAnalyzer
                     }
                 }
                 var methodRoute = GetAttributes(m.AttributeLists, "Route").Select(FirstStringArg).FirstOrDefault(s => s is not null);
-                if (verb is null && methodRoute is null) continue;
-                verb ??= "ANY";
-                template ??= methodRoute ?? "";
-
                 var action = m.Identifier.Text;
                 string full;
-                if (template.StartsWith('/') || template.StartsWith("~/"))
-                    full = NormalizeRoute(ReplaceTokens(template.TrimStart('~'), controllerName, action));
+                if (model.IsFramework && methodRoute is null)
+                {
+                    // Web API 2 convention routing: api/{controller}/{id}, verb from the attribute or the method name
+                    verb ??= HttpMethods.FirstOrDefault(v => action.StartsWith(v, StringComparison.OrdinalIgnoreCase));
+                    if (verb is null) continue;
+                    var hasId = m.ParameterList.Parameters.Any(p => p.Identifier.Text.Equals("id", StringComparison.OrdinalIgnoreCase));
+                    full = NormalizeRoute($"api/{controllerName}" + (hasId ? "/{id}" : ""));
+                    var prefix = baseRoute.TrimEnd('/');
+                    template = baseRoute == "/" ? full.TrimStart('/')
+                        : full.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase) ? full[(prefix.Length + 1)..]
+                        : "~" + full;
+                }
                 else
-                    full = CombineRoutes(baseRoute, ReplaceTokens(template, controllerName, action));
+                {
+                    if (verb is null && methodRoute is null) continue;
+                    verb ??= "ANY";
+                    template ??= methodRoute ?? "";
+                    if (template.StartsWith('/') || template.StartsWith("~/"))
+                        full = NormalizeRoute(ReplaceTokens(template.TrimStart('~'), controllerName, action));
+                    else
+                        full = CombineRoutes(baseRoute, ReplaceTokens(template, controllerName, action));
+                }
 
                 var routeParams = RouteParameterNames(full);
                 var parameters = m.ParameterList.Parameters.Select(p => DescribeParameter(p, routeParams)).ToList();
@@ -482,7 +573,7 @@ public static class ProjectAnalyzer
 
         ParamSource source;
         if (HasAttribute(p.AttributeLists, "FromRoute")) source = ParamSource.Route;
-        else if (HasAttribute(p.AttributeLists, "FromQuery")) source = ParamSource.Query;
+        else if (HasAttribute(p.AttributeLists, "FromQuery") || HasAttribute(p.AttributeLists, "FromUri")) source = routeParams.Contains(name) ? ParamSource.Route : ParamSource.Query;
         else if (HasAttribute(p.AttributeLists, "FromBody") || HasAttribute(p.AttributeLists, "FromForm")) source = ParamSource.Body;
         else if (HasAttribute(p.AttributeLists, "FromHeader")) source = ParamSource.Header;
         else if (HasAttribute(p.AttributeLists, "FromServices") || HasAttribute(p.AttributeLists, "FromKeyedServices")) source = ParamSource.Service;
@@ -539,7 +630,7 @@ public static class ProjectAnalyzer
             if (t.Contains(',')) return "Response";
         }
         if (t is "void") return "Nothing";
-        if (t is "Task" or "ValueTask" or "IActionResult" or "ActionResult" or "IResult") return "Response";
+        if (t is "Task" or "ValueTask" or "IActionResult" or "ActionResult" or "IResult" or "IHttpActionResult" or "HttpResponseMessage") return "Response";
         var list = Regex.Match(t, @"^(?:IEnumerable|List|IList|ICollection|IReadOnlyList|IReadOnlyCollection|IQueryable|IAsyncEnumerable)<(.+)>$");
         if (list.Success) return $"List of {list.Groups[1].Value}";
         if (t.EndsWith("[]")) return $"List of {t[..^2]}";

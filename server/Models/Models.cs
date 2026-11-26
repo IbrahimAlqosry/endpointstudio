@@ -45,11 +45,23 @@ public record EntityInfo(
 
 public record HistoryEntry(string Id, DateTime Time, string Description);
 
+public record ProjectCapabilities(
+    string Platform,
+    string FrameworkLabel,
+    bool SupportsMinimalApis,
+    bool SupportsHeaderInputs,
+    bool CanBuild,
+    bool CanRun,
+    string? BuildNote,
+    string? RunNote,
+    string? SupportNote);
+
 public record ProjectDetails(
     string Name,
     string Path,
     string Directory,
     string TargetFramework,
+    ProjectCapabilities Capabilities,
     string RootNamespace,
     EndpointStyle PreferredStyle,
     List<EndpointInfo> Endpoints,
@@ -125,6 +137,7 @@ public record DbTable(string Schema, string Name, List<DbColumn> Columns, bool I
 
 public record GenerateProjectRequest(
     DbConnectionInfo Connection,
+    string? TargetFramework,
     string ProjectName,
     string Location,
     EndpointStyle Style,
@@ -132,6 +145,8 @@ public record GenerateProjectRequest(
     bool IncludeApiDocs);
 
 public record TableSelection(string Schema, string Name, List<string> Operations);
+
+public record TargetOption(string Tfm, int Major, string Label, string Support, bool CanBuild, bool CanRun, bool Recommended);
 
 public record GenerateProjectResult(string ProjectPath, List<string> CreatedFiles, BuildResult? Build);
 

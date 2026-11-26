@@ -75,7 +75,8 @@ export function EndpointEditor({ project, initial, onClose, onSaved }: {
   const [groupKey, setGroupKey] = useState<string>(defaultGroup)
   const [newGroupName, setNewGroupName] = useState('')
   const [customGroupRoute, setCustomGroupRoute] = useState<string | null>(null)
-  const [newGroupStyle, setNewGroupStyle] = useState<EndpointStyle>(project.preferredStyle)
+  const caps = project.capabilities
+  const [newGroupStyle, setNewGroupStyle] = useState<EndpointStyle>(caps.supportsMinimalApis ? project.preferredStyle : 'Controller')
 
   // Endpoint
   const [method, setMethod] = useState(editing?.httpMethod ?? 'GET')
@@ -250,9 +251,13 @@ export function EndpointEditor({ project, initial, onClose, onSaved }: {
                   <Field label="Group name"><input className="input" autoFocus value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="e.g. Orders" /></Field>
                   <Field label="Path starts with"><input className="input mono" value={newGroupRoute} onChange={e => setCustomGroupRoute(e.target.value)} placeholder="/api/orders" /></Field>
                 </div>
-                <Field label="Style">
-                  <Segmented<EndpointStyle> value={newGroupStyle} onChange={setNewGroupStyle} options={[{ value: 'Controller', label: 'Controller' }, { value: 'MinimalApi', label: 'Minimal API' }]} />
-                </Field>
+                {caps.supportsMinimalApis ? (
+                  <Field label="Style">
+                    <Segmented<EndpointStyle> value={newGroupStyle} onChange={setNewGroupStyle} options={[{ value: 'Controller', label: 'Controller' }, { value: 'MinimalApi', label: 'Minimal API' }]} />
+                  </Field>
+                ) : (
+                  <div className="hint">{caps.frameworkLabel} uses controllers, so the new group will be a controller.</div>
+                )}
               </div>
             )}
           </div>
@@ -301,7 +306,7 @@ export function EndpointEditor({ project, initial, onClose, onSaved }: {
 
         {/* Inputs (simple behaviors) */}
         {!editing && behavior && !behavior.data && (
-          <InputsEditor inputs={inputs} onChange={setInputs} method={method} entities={project.entities.map(e => e.name)} />
+          <InputsEditor inputs={inputs} onChange={setInputs} method={method} entities={project.entities.map(e => e.name)} allowHeaders={caps.supportsHeaderInputs} />
         )}
 
         {editing && (
@@ -326,7 +331,7 @@ export function EndpointEditor({ project, initial, onClose, onSaved }: {
   )
 }
 
-function InputsEditor({ inputs, onChange, method, entities }: { inputs: EndpointParam[]; onChange: (p: EndpointParam[]) => void; method: string; entities: string[] }) {
+function InputsEditor({ inputs, onChange, method, entities, allowHeaders }: { inputs: EndpointParam[]; onChange: (p: EndpointParam[]) => void; method: string; entities: string[]; allowHeaders: boolean }) {
   const types = [...BASE_TYPES, ...entities.map(e => ({ value: e, label: `${splitWords(e)} record` }))]
   const noBody = method === 'GET' || method === 'DELETE'
   const update = (i: number, patch: Partial<EndpointParam>) => onChange(inputs.map((p, j) => j === i ? { ...p, ...patch } : p))
@@ -360,7 +365,7 @@ function InputsEditor({ inputs, onChange, method, entities }: { inputs: Endpoint
                   const source = e.target.value as ParamSource
                   update(i, { source, type: source !== 'Body' && (p.type === 'json' || entities.includes(p.type)) ? 'string' : p.type })
                 }}>
-                  {SOURCES.filter(s => !(noBody && s.value === 'Body')).map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  {SOURCES.filter(s => !(noBody && s.value === 'Body') && (allowHeaders || s.value !== 'Header')).map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               )}
               <label className="row gap-6 small" title="Optional" style={{ visibility: p.source === 'Route' ? 'hidden' : undefined }}>
