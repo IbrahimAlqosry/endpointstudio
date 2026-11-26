@@ -58,9 +58,17 @@ public class RecentProjectsStore
     {
         try
         {
-            return File.Exists(_file)
-                ? JsonSerializer.Deserialize<List<RecentProject>>(File.ReadAllText(_file), AppStorage.Json) ?? []
-                : [];
+            foreach (var candidate in new[] { _file, _file + ".bak" })
+            {
+                if (!File.Exists(candidate)) continue;
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    try { return JsonSerializer.Deserialize<List<RecentProject>>(File.ReadAllText(candidate), AppStorage.Json) ?? []; }
+                    catch (IOException) { Thread.Sleep(50); } // another instance is writing: try again
+                    catch (JsonException) { break; }          // unreadable: fall back to the backup
+                }
+            }
+            return [];
         }
         catch { return []; }
     }
@@ -68,6 +76,11 @@ public class RecentProjectsStore
     private void Save(List<RecentProject> list)
     {
         Directory.CreateDirectory(AppStorage.Root);
-        File.WriteAllText(_file, JsonSerializer.Serialize(list, AppStorage.Json));
+        // Write to a temporary file and swap it in, keeping the previous version as a backup,
+        // so a crash or a second instance can never leave a half-written (and then emptied) list.
+        var temp = _file + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(list, AppStorage.Json));
+        if (File.Exists(_file)) File.Replace(temp, _file, _file + ".bak", ignoreMetadataErrors: true);
+        else File.Move(temp, _file);
     }
 }
