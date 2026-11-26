@@ -33,7 +33,7 @@ public class FileSystemService
         catch { return true; }
     }
 
-    public BrowseResult Browse(string? path)
+    public BrowseResult Browse(string? path, string? extensions = null)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -65,7 +65,16 @@ public class FileSystemService
             .Select(f => new SolutionEntry(Path.GetFileNameWithoutExtension(f.Name), f.FullName))
             .ToList();
 
-        return new BrowseResult(dir.FullName, dir.Parent?.FullName, folders, projects, solutions);
+        List<FileEntry>? files = null;
+        if (!string.IsNullOrWhiteSpace(extensions))
+        {
+            var exts = extensions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(e => e.StartsWith('.') ? e : "." + e).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            files = dir.EnumerateFiles().Where(f => exts.Contains(f.Extension))
+                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(f => new FileEntry(f.Name, f.FullName, f.Length)).ToList();
+        }
+        return new BrowseResult(dir.FullName, dir.Parent?.FullName, folders, projects, solutions, files);
     }
 
     /// <summary>Finds .csproj files below a folder.</summary>

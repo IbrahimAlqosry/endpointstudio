@@ -14,6 +14,10 @@ public class SourceFile
     public required string Relative { get; init; }
     public required string Text { get; init; }
     public required CompilationUnitSyntax Root { get; init; }
+    /// <summary>Name of the project the file belongs to.</summary>
+    public string Project { get; init; } = "";
+    /// <summary>True for files that come from a referenced project (another project in the solution).</summary>
+    public bool IsReference { get; init; }
 }
 
 public class EndpointRecord
@@ -56,6 +60,10 @@ public class ProjectModel
     public List<EntityInfo> Entities { get; } = [];
     public List<string> Warnings { get; } = [];
     public bool IsWebProject { get; set; }
+    public List<ProjectRefInfo> ReferencedProjects { get; } = [];
+    public List<string> BinaryReferences { get; } = [];
+    public List<ServiceInfo> Services { get; } = [];
+    public string? SolutionPath { get; set; }
 
     /// <summary>.NET Framework (ASP.NET Web API 2) or modern .NET / .NET Core.</summary>
     public required ProjectPlatform Platform { get; init; }
@@ -83,8 +91,8 @@ public class ProjectModel
         Files.Any(f => f.Text.Contains("MapControllers(")) ? EndpointStyle.Controller : EndpointStyle.MinimalApi;
 
     public SourceFile? ProgramFile =>
-        Files.FirstOrDefault(f => System.IO.Path.GetFileName(f.Path).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
-        ?? Files.FirstOrDefault(f => f.Text.Contains("WebApplication.CreateBuilder"));
+        Files.FirstOrDefault(f => !f.IsReference && System.IO.Path.GetFileName(f.Path).Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
+        ?? Files.FirstOrDefault(f => !f.IsReference && f.Text.Contains("WebApplication.CreateBuilder"));
 }
 
 public enum ProjectPlatform { NetCore, NetFramework }
@@ -159,7 +167,7 @@ public static class ProjectAnalyzer
             TargetFramework = tfm,
             RootNamespace = rootNs,
             Packages = packages,
-            Files = LoadSources(dir),
+            Files = LoadSources(dir, dir, name, false),
             Platform = platform,
             FrameworkVersion = major,
             FrameworkLabel = label,
@@ -173,13 +181,98 @@ public static class ProjectAnalyzer
         if (!model.IsWebProject)
             model.Warnings.Add("This doesn't look like a web API project, so it may not be able to serve endpoints.");
 
+        // Read the rest of the solution: projects this one references (services, models, data access…)
+        LoadReferencedProjects(model, pf, model.CsprojPath, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { model.CsprojPath }, 0);
+        model.BinaryReferences.AddRange(doc.Descendants()
+            .Where(e => e.Name.LocalName == "Reference" && e.Elements().Any(c => c.Name.LocalName == "HintPath"))
+            .Select(e => ((string?)e.Attribute("Include") ?? "").Split(',')[0].Trim())
+            .Where(n => n.Length > 0 && !packages.Any(pk => n.StartsWith(pk, StringComparison.OrdinalIgnoreCase)))
+            .Distinct());
+        model.SolutionPath = FindSolution(model.CsprojPath);
+
         foreach (var file in model.Files)
         {
             FindControllers(model, file);
             FindMinimalApis(model, file);
         }
         FindEntities(model);
+        FindServices(model);
         return model;
+    }
+
+    private static void LoadReferencedProjects(ProjectModel model, ProjectFile pf, string csprojPath, HashSet<string> visited, int depth)
+    {
+        if (depth > 6) return;
+        var baseDir = Path.GetDirectoryName(csprojPath)!;
+        foreach (var include in pf.Document.Descendants().Where(e => e.Name.LocalName == "ProjectReference").Select(e => (string?)e.Attribute("Include")))
+        {
+            if (string.IsNullOrWhiteSpace(include) || include.Contains("$(")) continue;
+            var path = Path.GetFullPath(Path.Combine(baseDir, include.Replace('\\', Path.DirectorySeparatorChar)));
+            if (!File.Exists(path) || !visited.Add(path)) continue;
+            ProjectFile refPf;
+            try { refPf = ProjectFile.Load(path); } catch { continue; }
+            var refName = Path.GetFileNameWithoutExtension(path);
+            var files = LoadSources(Path.GetDirectoryName(path)!, model.Directory, refName, true);
+            model.Files.AddRange(files);
+            var (_, _, label) = DescribeFramework(refPf.TargetFramework);
+            model.ReferencedProjects.Add(new ProjectRefInfo(refName, path, refPf.TargetFramework.Length > 0 ? label : null,
+                DetectRole(refName, refPf, files.Select(f => f.Text)), refPf.IsWeb));
+            LoadReferencedProjects(model, refPf, path, visited, depth + 1);
+        }
+    }
+
+    /// <summary>The solution file (.sln/.slnx) in this folder or above that lists the project.</summary>
+    public static string? FindSolution(string csprojPath)
+    {
+        var fileName = Path.GetFileName(csprojPath);
+        var dir = new DirectoryInfo(Path.GetDirectoryName(csprojPath)!);
+        for (var i = 0; dir is not null && i < 4; i++, dir = dir.Parent)
+        {
+            foreach (var sln in dir.EnumerateFiles("*.sln").Concat(dir.EnumerateFiles("*.slnx")))
+            {
+                try { if (File.ReadAllText(sln.FullName).Contains(fileName, StringComparison.OrdinalIgnoreCase)) return sln.FullName; }
+                catch { /* unreadable */ }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Guesses what a project is for from its name, project file and code.</summary>
+    public static string DetectRole(string name, ProjectFile pf, IEnumerable<string> sources)
+    {
+        var doc = pf.Document.ToString();
+        if (doc.Contains("Microsoft.NET.Test.Sdk") || doc.Contains("xunit") || doc.Contains("NUnit") || name.EndsWith("Tests", StringComparison.OrdinalIgnoreCase)) return "Tests";
+        if (pf.IsWeb) return "API";
+        var texts = sources.ToList();
+        bool Any(params string[] needles) => texts.Any(t => needles.Any(n => t.Contains(n, StringComparison.Ordinal)));
+        if (Any(": ControllerBase", ": ApiController", ": Controller")) return "Controllers";
+        // The project name says the most about intent; the code decides only when the name doesn't.
+        if (Regex.IsMatch(name, @"Model|DTO|Entit|Domain|Contract", RegexOptions.IgnoreCase)) return "Models";
+        if (Regex.IsMatch(name, "Service|Business|Application|Logic", RegexOptions.IgnoreCase)) return "Services";
+        if (Regex.IsMatch(name, @"Data|DAL|Repository|Persistence|Infrastructure|\.DB\b|DB\.", RegexOptions.IgnoreCase)) return "Data access";
+        if (texts.Any(t => Regex.IsMatch(t, @"interface\s+I\w*Service\b"))) return "Services";
+        if (Any(": DbContext", "OracleCommand", "SqlCommand", "NpgsqlCommand", "MySqlCommand", "DbSet<")) return "Data access";
+        return "Library";
+    }
+
+    /// <summary>Service interfaces (IXxxService) and the classes that implement them, across the solution.</summary>
+    private static void FindServices(ProjectModel model)
+    {
+        var interfaces = model.Files
+            .SelectMany(f => f.Root.DescendantNodes().OfType<InterfaceDeclarationSyntax>().Select(i => (File: f, Node: i)))
+            .Where(x => Regex.IsMatch(x.Node.Identifier.Text, @"^I[A-Z]\w*(Service|Repository|Manager|Provider)$"))
+            .ToList();
+        var classes = model.Files.SelectMany(f => f.Root.DescendantNodes().OfType<ClassDeclarationSyntax>().Select(c => (File: f, Node: c))).ToList();
+        foreach (var (file, iface) in interfaces)
+        {
+            var name = iface.Identifier.Text;
+            var impl = classes.FirstOrDefault(c => c.Node.BaseList?.Types.Any(t => SimpleName(t.Type) == name) == true);
+            model.Services.Add(new ServiceInfo(
+                name,
+                impl.Node?.Identifier.Text,
+                file.Project,
+                iface.Members.OfType<MethodDeclarationSyntax>().Count()));
+        }
     }
 
     /// <summary>Turns a target framework moniker into a platform, major version and friendly label.</summary>
@@ -216,7 +309,7 @@ public static class ProjectAnalyzer
         catch { return (ProjectPlatform.NetCore, 0, false); }
     }
 
-    private static List<SourceFile> LoadSources(string projectDir)
+    private static List<SourceFile> LoadSources(string projectDir, string relativeTo, string projectName, bool isReference)
     {
         var files = new List<SourceFile>();
         Walk(new DirectoryInfo(projectDir), true);
@@ -238,9 +331,11 @@ public static class ProjectAnalyzer
                 files.Add(new SourceFile
                 {
                     Path = f.FullName,
-                    Relative = Path.GetRelativePath(projectDir, f.FullName).Replace('\\', '/'),
+                    Relative = Path.GetRelativePath(relativeTo, f.FullName).Replace('\\', '/'),
                     Text = text,
                     Root = (CompilationUnitSyntax)tree.GetRoot(),
+                    Project = projectName,
+                    IsReference = isReference,
                 });
             }
             foreach (var sub in d.EnumerateDirectories()) Walk(sub, false);
@@ -265,7 +360,7 @@ public static class ProjectAnalyzer
             var classRoute = GetAttributes(cls.AttributeLists, "Route").Concat(GetAttributes(cls.AttributeLists, "RoutePrefix"))
                 .Select(FirstStringArg).FirstOrDefault(s => s is not null) ?? "";
             var baseRoute = NormalizeRoute(ReplaceTokens(classRoute, controllerName, null));
-            var classAuth = HasAttribute(cls.AttributeLists, "Authorize");
+            var classAuth = HasAuthAttribute(cls.AttributeLists);
 
             var group = new GroupRecord
             {
@@ -321,11 +416,12 @@ public static class ProjectAnalyzer
                 var routeParams = RouteParameterNames(full);
                 var parameters = m.ParameterList.Parameters.Select(p => DescribeParameter(p, routeParams)).ToList();
 
-                var requiresAuth = (classAuth || HasAttribute(m.AttributeLists, "Authorize")) && !HasAttribute(m.AttributeLists, "AllowAnonymous");
+                var requiresAuth = (classAuth || HasAuthAttribute(m.AttributeLists)) && !HasAttribute(m.AttributeLists, "AllowAnonymous");
                 var summary = GetDocSummary(m) ?? GetAttributes(m.AttributeLists, "EndpointSummary").Select(FirstStringArg).FirstOrDefault();
 
                 var info = new EndpointInfo(
                     Id: MakeId(file, m.Identifier.SpanStart),
+                    Project: file.Project,
                     Style: EndpointStyle.Controller,
                     HttpMethod: verb,
                     Route: full,
@@ -344,6 +440,8 @@ public static class ProjectAnalyzer
                 model.Endpoints.Add(rec);
             }
 
+            // A controller with no route and no endpoints is a shared base class, not a group of endpoints.
+            if (group.Endpoints.Count == 0 && classRoute.Length == 0) continue;
             model.Groups.Add(group);
         }
     }
@@ -437,6 +535,7 @@ public static class ProjectAnalyzer
 
             var info = new EndpointInfo(
                 Id: MakeId(file, ma.Name.SpanStart),
+                Project: file.Project,
                 Style: EndpointStyle.MinimalApi,
                 HttpMethod: verb,
                 Route: full,
@@ -679,6 +778,11 @@ public static class ProjectAnalyzer
         lists.SelectMany(l => l.Attributes).Where(a => AttributeName(a) == name);
 
     public static bool HasAttribute(SyntaxList<AttributeListSyntax> lists, string name) => GetAttributes(lists, name).Any();
+
+    /// <summary>[Authorize] or a custom authorization attribute such as [CustomAuthorizationFilter] or [JwtAuthorize].</summary>
+    public static bool HasAuthAttribute(SyntaxList<AttributeListSyntax> lists) =>
+        lists.SelectMany(l => l.Attributes).Select(AttributeName)
+            .Any(n => n == "Authorize" || n.Contains("Authoriz", StringComparison.OrdinalIgnoreCase) && !n.Contains("Anonymous", StringComparison.OrdinalIgnoreCase));
 
     public static string? FirstStringArg(AttributeSyntax a)
     {

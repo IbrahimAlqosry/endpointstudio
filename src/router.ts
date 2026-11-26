@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 export type Route =
   | { page: 'home' }
   | { page: 'project'; path: string }
+  | { page: 'solution'; path: string }
   | { page: 'new' }
 
 function parse(hash: string): Route {
@@ -10,6 +11,7 @@ function parse(hash: string): Route {
   const [p, query = ''] = h.split('?')
   const params = new URLSearchParams(query)
   if (p === '/project' && params.get('path')) return { page: 'project', path: params.get('path')! }
+  if (p === '/solution' && params.get('path')) return { page: 'solution', path: params.get('path')! }
   if (p === '/new') return { page: 'new' }
   return { page: 'home' }
 }
@@ -17,6 +19,7 @@ function parse(hash: string): Route {
 export function href(route: Route): string {
   switch (route.page) {
     case 'project': return `#/project?path=${encodeURIComponent(route.path)}`
+    case 'solution': return `#/solution?path=${encodeURIComponent(route.path)}`
     case 'new': return '#/new'
     default: return '#/'
   }
@@ -24,6 +27,15 @@ export function href(route: Route): string {
 
 export function navigate(route: Route) {
   window.location.hash = href(route)
+}
+
+/** Opens a project file or a solution file on the right page. */
+export function openPath(path: string) {
+  navigate(/\.slnx?$/i.test(path) ? { page: 'solution', path } : { page: 'project', path })
+}
+
+export function routeFor(path: string): Route {
+  return /\.slnx?$/i.test(path) ? { page: 'solution', path } : { page: 'project', path }
 }
 
 export function useRoute(): Route {

@@ -6,7 +6,8 @@ import { ConfirmProvider, Segmented, ToastProvider, useTheme, type Theme } from 
 import { HomePage } from './pages/HomePage'
 import { NewProjectPage } from './pages/NewProjectPage'
 import { ProjectPage } from './pages/ProjectPage'
-import { href, navigate, useRoute } from './router'
+import { SolutionPage } from './pages/SolutionPage'
+import { href, openPath, routeFor, useRoute } from './router'
 import type { RecentProject } from './types'
 
 export default function App() {
@@ -30,7 +31,7 @@ function Shell() {
   useEffect(() => { refreshRecent() }, [refreshRecent, route])
   useEffect(() => { setMenuOpen(false) }, [route])
 
-  const openProject = (path: string) => { setPicker(false); navigate({ page: 'project', path }) }
+  const openProject = (path: string) => { setPicker(false); openPath(path) }
 
   return (
     <div className="app">
@@ -55,11 +56,11 @@ function Shell() {
             {recent.slice(0, 8).map(p => (
               <a
                 key={p.path}
-                className={`nav-item${route.page === 'project' && route.path.toLowerCase() === p.path.toLowerCase() ? ' active' : ''}`}
-                href={href({ page: 'project', path: p.path })}
+                className={`nav-item${(route.page === 'project' || route.page === 'solution') && route.path.toLowerCase() === p.path.toLowerCase() ? ' active' : ''}`}
+                href={href(routeFor(p.path))}
                 title={p.path}
               >
-                <Icon name="box" size={16} />
+                <Icon name={/\.slnx?$/i.test(p.path) ? 'layers' : 'box'} size={16} />
                 <span className="truncate">{p.name}</span>
                 <span className="count">{p.endpointCount}</span>
               </a>
@@ -88,6 +89,7 @@ function Shell() {
         </div>
         {route.page === 'home' && <HomePage recent={recent} onOpen={() => setPicker(true)} onForget={async p => { await api.forget(p); refreshRecent() }} />}
         {route.page === 'project' && <ProjectPage key={route.path} path={route.path} onChanged={refreshRecent} />}
+        {route.page === 'solution' && <SolutionPage key={route.path} path={route.path} onChanged={refreshRecent} />}
         {route.page === 'new' && <NewProjectPage />}
       </main>
 

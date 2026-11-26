@@ -1,6 +1,6 @@
 import { Icon } from '../components/Icon'
 import { Button, Empty, timeAgo } from '../components/ui'
-import { navigate } from '../router'
+import { navigate, openPath } from '../router'
 import type { RecentProject } from '../types'
 
 export function HomePage({ recent, onOpen, onForget }: { recent: RecentProject[]; onOpen: () => void; onForget: (path: string) => void }) {
@@ -49,14 +49,14 @@ export function HomePage({ recent, onOpen, onForget }: { recent: RecentProject[]
       ) : (
         <div className="project-grid">
           {recent.map(p => (
-            <div key={p.path} className="card hoverable project-card" onClick={() => navigate({ page: 'project', path: p.path })}>
+            <div key={p.path} className="card hoverable project-card" onClick={() => openPath(p.path)}>
               <button
                 className="btn icon sm ghost remove"
                 title="Remove from recent"
                 onClick={e => { e.stopPropagation(); onForget(p.path) }}
               ><Icon name="x" size={15} /></button>
               <div className="row">
-                <div className="group-icon"><Icon name="box" size={17} /></div>
+                <div className="group-icon"><Icon name={/\.slnx?$/i.test(p.path) ? 'layers' : 'box'} size={17} /></div>
                 <div className="grow">
                   <div className="strong truncate">{p.name}</div>
                   <div className="tiny subtle">Opened {timeAgo(p.lastOpened)}</div>
@@ -64,6 +64,7 @@ export function HomePage({ recent, onOpen, onForget }: { recent: RecentProject[]
               </div>
               <div className="tiny subtle truncate" title={p.path}>{folderOf(p.path)}</div>
               <div className="row">
+                {/\.slnx?$/i.test(p.path) && <span className="badge">Solution</span>}
                 <span className="badge accent">{p.endpointCount} endpoint{p.endpointCount === 1 ? '' : 's'}</span>
               </div>
             </div>

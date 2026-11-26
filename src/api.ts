@@ -1,6 +1,6 @@
 import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
-  GenerateProjectResult, ProjectDetails, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
+  GenerateProjectResult, HealthReport, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
 } from './types'
 
 export class ApiError extends Error {}
@@ -33,7 +33,7 @@ const q = (path: string) => `path=${encodeURIComponent(path)}`
 export const api = {
   system: () => request<SystemInfo>('GET', '/api/system'),
 
-  browse: (path?: string | null) => request<BrowseResult>('GET', `/api/fs/browse${path ? `?${q(path)}` : ''}`),
+  browse: (path?: string | null, ext?: string) => request<BrowseResult>('GET', `/api/fs/browse?${path ? q(path) : ''}${ext ? `&ext=${encodeURIComponent(ext)}` : ''}`),
   findProjects: (root: string) => request<ProjectFileEntry[]>('GET', `/api/fs/find-projects?root=${encodeURIComponent(root)}`),
   solutionProjects: (path: string) => request<ProjectFileEntry[]>('GET', `/api/fs/solution?${q(path)}`),
   reveal: (path: string) => request<void>('POST', '/api/fs/reveal', { path }),
@@ -43,11 +43,15 @@ export const api = {
   forget: (path: string) => request<void>('DELETE', `/api/projects/recent?${q(path)}`),
 
   project: (path: string) => request<ProjectDetails>('GET', `/api/project?${q(path)}`),
+  solution: (path: string) => request<SolutionDetails>('GET', `/api/solution?${q(path)}`),
   addEndpoint: (path: string, req: AddEndpointRequest) => request<ChangeResult>('POST', `/api/project/endpoints?${q(path)}`, req),
   updateEndpoint: (path: string, id: string, req: UpdateEndpointRequest) => request<ChangeResult>('PUT', `/api/project/endpoints/${encodeURIComponent(id)}?${q(path)}`, req),
   deleteEndpoint: (path: string, id: string) => request<ChangeResult>('DELETE', `/api/project/endpoints/${encodeURIComponent(id)}?${q(path)}`),
   undo: (path: string) => request<ChangeResult>('POST', `/api/project/undo?${q(path)}`),
   build: (path: string) => request<BuildResult>('POST', `/api/project/build?${q(path)}`),
+  health: (path: string) => request<HealthReport>('GET', `/api/project/health?${q(path)}`),
+  upgradePlan: (path: string, req: UpgradeRequest) => request<UpgradePlan>('POST', `/api/project/upgrade/plan?${q(path)}`, req),
+  upgrade: (path: string, req: UpgradeRequest) => request<ChangeResult>('POST', `/api/project/upgrade?${q(path)}`, req),
   runStatus: (path: string) => request<RunStatus>('GET', `/api/project/run?${q(path)}`),
   run: (path: string) => request<RunStatus>('POST', `/api/project/run?${q(path)}`),
   stop: (path: string) => request<RunStatus>('POST', `/api/project/stop?${q(path)}`),

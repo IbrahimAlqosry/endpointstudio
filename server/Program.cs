@@ -20,6 +20,7 @@ builder.Services.AddSingleton<DotnetService>();
 builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddSingleton<EndpointWriter>();
 builder.Services.AddSingleton<ProjectGenerator>();
+builder.Services.AddSingleton<UpgradeService>();
 
 var app = builder.Build();
 
@@ -71,7 +72,7 @@ api.MapGet("/system", async (DotnetService dotnet) =>
 });
 
 // ---------------------------------------------------------------- File system
-api.MapGet("/fs/browse", (string? path, FileSystemService fs) => fs.Browse(path));
+api.MapGet("/fs/browse", (string? path, string? ext, FileSystemService fs) => fs.Browse(path, ext));
 api.MapGet("/fs/find-projects", (string root, FileSystemService fs) => fs.FindProjects(root));
 api.MapGet("/fs/solution", (string path, FileSystemService fs) => fs.SolutionProjects(path));
 
@@ -132,6 +133,19 @@ api.MapPost("/project/undo", async (string path, HistoryService history, DotnetS
     return new { message = $"Undone: {what}", project = await ToDetails(ProjectAnalyzer.Analyze(path), history, dotnet) };
 });
 
+api.MapGet("/project/health", async (string path, DotnetService dotnet) =>
+{
+    var model = ProjectAnalyzer.Analyze(path);
+    return HealthService.Check(model, await dotnet.CapabilitiesAsync(model));
+});
+
+api.MapPost("/project/upgrade/plan", (string path, UpgradeRequest req, UpgradeService upgrade, CancellationToken ct) => upgrade.PlanAsync(path, req, ct));
+api.MapPost("/project/upgrade", async (string path, UpgradeRequest req, UpgradeService upgrade, HistoryService history, DotnetService dotnet, CancellationToken ct) =>
+{
+    var message = await upgrade.ApplyAsync(path, req, ct);
+    return new { message, project = await ToDetails(ProjectAnalyzer.Analyze(path), history, dotnet) };
+});
+
 api.MapPost("/project/build", (string path, DotnetService dotnet, CancellationToken ct) => dotnet.BuildAsync(path, ct));
 
 api.MapGet("/project/run", (string path, DotnetService dotnet) => dotnet.Status(path));
@@ -144,6 +158,13 @@ api.MapGet("/project/postman", (string path, string? baseUrl) =>
     var model = ProjectAnalyzer.Analyze(path);
     var json = PostmanExporter.Export(model, baseUrl);
     return Results.File(Encoding.UTF8.GetBytes(json), "application/json", $"{model.Name}.postman_collection.json");
+});
+
+api.MapGet("/solution", (string path, RecentProjectsStore recent) =>
+{
+    var details = SolutionService.Load(path);
+    recent.Touch(details.Path, details.Name, details.Projects.Sum(p => p.EndpointCount ?? 0));
+    return details;
 });
 
 // ---------------------------------------------------------------- Database
@@ -184,6 +205,10 @@ static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService histo
     m.Entities,
     m.Packages,
     history.GetEntries(m.CsprojPath),
-    m.Warnings);
+    m.Warnings,
+    m.SolutionPath,
+    m.ReferencedProjects,
+    m.BinaryReferences,
+    m.Services);
 
 record PathBody(string Path);

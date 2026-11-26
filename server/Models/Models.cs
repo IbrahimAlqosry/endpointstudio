@@ -5,7 +5,8 @@ public record DriveEntry(string Name, string Path, string? Label);
 public record FolderEntry(string Name, string Path);
 public record ProjectFileEntry(string Name, string Path, string? Framework, bool IsWeb);
 public record SolutionEntry(string Name, string Path);
-public record BrowseResult(string? Path, string? Parent, List<FolderEntry> Folders, List<ProjectFileEntry> Projects, List<SolutionEntry> Solutions);
+public record FileEntry(string Name, string Path, long Size);
+public record BrowseResult(string? Path, string? Parent, List<FolderEntry> Folders, List<ProjectFileEntry> Projects, List<SolutionEntry> Solutions, List<FileEntry>? Files = null);
 
 // ---------- Projects ----------
 public record RecentProject(string Name, string Path, DateTime LastOpened, int EndpointCount);
@@ -17,6 +18,7 @@ public record EndpointParam(string Name, string Type, ParamSource Source, bool O
 
 public record EndpointInfo(
     string Id,
+    string Project,
     EndpointStyle Style,
     string HttpMethod,
     string Route,
@@ -44,6 +46,12 @@ public record EntityInfo(
     string? KeyType,
     List<EntityProperty> Properties);
 
+public record ProjectRefInfo(string Name, string Path, string? Framework, string Role, bool IsWeb);
+public record ServiceInfo(string Interface, string? Implementation, string Project, int Methods);
+
+public record SolutionProjectInfo(string Name, string Path, string? Framework, string Role, bool IsWeb, List<string> References, int? EndpointCount, int FileCount);
+public record SolutionDetails(string Name, string Path, List<SolutionProjectInfo> Projects);
+
 public record HistoryEntry(string Id, DateTime Time, string Description);
 
 public record ProjectCapabilities(
@@ -70,7 +78,11 @@ public record ProjectDetails(
     List<EntityInfo> Entities,
     List<string> Packages,
     List<HistoryEntry> History,
-    List<string> Warnings);
+    List<string> Warnings,
+    string? SolutionPath,
+    List<ProjectRefInfo> ReferencedProjects,
+    List<string> BinaryReferences,
+    List<ServiceInfo> Services);
 
 // ---------- Endpoint editing ----------
 public static class Behaviors
@@ -122,7 +134,7 @@ public record TryRequest(string Method, string Path, Dictionary<string, string>?
 public record TryResponse(int Status, string StatusText, Dictionary<string, string> Headers, string Body, long DurationMs, string? ContentType);
 
 // ---------- Database ----------
-public enum DbProvider { SqlServer, MySql }
+public enum DbProvider { SqlServer, MySql, PostgreSql, Oracle, Sqlite }
 
 public record DbConnectionInfo(
     DbProvider Provider,
@@ -131,7 +143,8 @@ public record DbConnectionInfo(
     bool IntegratedSecurity,
     string? Username,
     string? Password,
-    string? Database);
+    string? Database,
+    string? ServiceName = null);
 
 public record DbColumn(string Name, string SqlType, string ClrType, bool Nullable, bool IsPrimaryKey, bool IsIdentity, bool IsComputed, int? MaxLength, bool Supported);
 public record DbTable(string Schema, string Name, List<DbColumn> Columns, bool IsView, long? RowCount);

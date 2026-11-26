@@ -6,7 +6,8 @@ A visual, no-code studio for **.NET Web APIs**, from **.NET Framework 4.x (ASP.N
 
 | Area | What you can do |
 | --- | --- |
-| **Projects** | Browse your computer for `.csproj` files, scan a folder for projects, reopen recent projects, show the project in Explorer or open it in VS Code |
+| **Projects & solutions** | Browse your computer for projects and solutions (`.sln` / `.slnx`), scan a folder, reopen recent items, show them in Explorer or open them in VS Code |
+| **Reads the whole solution** | Opening a project also reads the projects it references, so controllers in libraries, DbContexts in data projects and services (`IXxxService` → implementation) are found. The Solution page shows every project with its role (API, Services, Data access, Models, Tests), version, dependencies and endpoint count |
 | **Endpoint explorer** | Endpoints grouped by controller or route group, colour-coded HTTP methods, search, method filters and dashboard stats |
 | **Add endpoints** | A two-step wizard. Choose what the endpoint does, then fill in a form. Data actions (list, get, search, add, update and delete records) work against the project's EF Core tables. Simple actions (message, echo, placeholder, no content) take custom inputs from the path, query, body or headers |
 | **Edit endpoints** | Change the HTTP method, path, name, description and sign-in requirement |
@@ -15,7 +16,9 @@ A visual, no-code studio for **.NET Web APIs**, from **.NET Framework 4.x (ASP.N
 | **Build check** | Compiles the project and lists any problems in plain language |
 | **Run & try** | Starts the API on a free port, and a **Try it** panel sends real requests and explains the status codes |
 | **Export** | Downloads a Postman collection (v2.1) of every endpoint, with sample request bodies |
-| **New from database** | A four-step wizard: connect (SQL Server or MySQL) → pick a database → pick tables and operations → settings. It generates entities, a `DbContext`, CRUD endpoints (Controllers or Minimal APIs) and optional interactive API docs (Scalar), then runs a build check |
+| **New from database** | A four-step wizard: connect (**SQL Server, PostgreSQL, MySQL, Oracle or SQLite**) → pick a database or schema → pick tables and operations → settings. It generates entities, a `DbContext`, CRUD endpoints (Controllers or Minimal APIs) and optional interactive API docs, then runs a build check |
+| **Health check** | Scores the project and lists problems: duplicate routes, open endpoints in a protected API, keys and certificates in the project folder, passwords in config files, error details sent to callers, data changes through GET, unsupported .NET versions, old packages, missing descriptions |
+| **Upgrade assistant** | Moves .NET Core 2.x/3.x and .NET 5–9 projects (optionally with the projects they use) to a newer .NET: target framework (also in `Directory.Build.props`), version-matched packages (also in `Directory.Packages.props`), obsolete ASP.NET Core 2 packages, and package conflicts found by restore. One Undo reverts it all |
 | **Every .NET version** | Detects each project's .NET version and writes code that fits it (see the table below) |
 | **Look & feel** | Light, dark and system themes, and a responsive layout |
 
@@ -54,6 +57,16 @@ Generated code follows each project's settings: nullable annotations only when `
 | .NET 8 | 8.0.34 | 8.0.3 | Swagger UI (Swashbuckle 6.9) |
 | .NET 9 | 9.0.23 | 9.0.0 | Built-in OpenAPI + Scalar 2.21 |
 | .NET 10 / 11 | 10.0.15 / 11.0.0 | 9.0.0 | Built-in OpenAPI + Scalar 3.2 |
+
+## Databases
+
+| Database | Reads | Generated project uses | Notes |
+| --- | --- | --- | --- |
+| SQL Server | Databases, schemas, tables, views, identity, computed and rowversion columns | `Microsoft.EntityFrameworkCore.SqlServer` | Windows or SQL sign-in |
+| PostgreSQL | Databases, schemas, tables, views, identity/serial, `uuid`, `jsonb`, `timestamptz` | `Npgsql.EntityFrameworkCore.PostgreSQL` | snake_case names become PascalCase; arrays and custom enum types are skipped |
+| MySQL / MariaDB | Databases, tables, views, auto-increment | `Pomelo.EntityFrameworkCore.MySql` | |
+| Oracle | Schemas (owners), tables, views, identity and virtual columns, `NUMBER(p,s)` precision | `Oracle.EntityFrameworkCore` | Connect with host, port and **service name**; UPPER_CASE names become PascalCase; Oracle 12c or newer |
+| SQLite | Tables and views in a `.db` file | `Microsoft.EntityFrameworkCore.Sqlite` | Pick the file with the built-in browser |
 
 ## Requirements
 

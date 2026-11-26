@@ -3,7 +3,9 @@ import { api } from '../api'
 import { BuildDialog } from '../components/BuildDialog'
 import { EndpointDrawer } from '../components/EndpointDrawer'
 import { EndpointEditor } from '../components/EndpointEditor'
+import { HealthDialog } from '../components/HealthDialog'
 import { HistoryDialog } from '../components/HistoryDialog'
+import { UpgradeDialog } from '../components/UpgradeDialog'
 import { Icon } from '../components/Icon'
 import { Alert, Button, Empty, MethodBadge, RouteText, Spinner, errorText, useConfirm, useToast } from '../components/ui'
 import { href } from '../router'
@@ -25,6 +27,8 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
   const [editor, setEditor] = useState<{ mode: 'add'; groupKey?: string } | { mode: 'edit'; endpoint: EndpointInfo } | null>(null)
   const [build, setBuild] = useState<BuildResult | 'loading' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [healthOpen, setHealthOpen] = useState(false)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [run, setRun] = useState<RunStatus | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -135,7 +139,11 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
     <div className="page">
       <div className="page-header">
         <div className="grow" style={{ minWidth: 260 }}>
-          <div className="crumbs"><a href={href({ page: 'home' })}>Home</a><Icon name="chevronRight" size={12} /><span>Project</span></div>
+          <div className="crumbs">
+            <a href={href({ page: 'home' })}>Home</a><Icon name="chevronRight" size={12} />
+            {project.solutionPath && <><a href={href({ page: 'solution', path: project.solutionPath })}>{fileName(project.solutionPath)}</a><Icon name="chevronRight" size={12} /></>}
+            <span>{project.name}</span>
+          </div>
           <div className="row wrap">
             <h1 className="page-title">{project.name}</h1>
             <span className={`badge${project.capabilities.platform === 'NetFramework' ? ' warning' : ''}`} title={project.targetFramework}>{project.capabilities.frameworkLabel}</span>
@@ -151,6 +159,8 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
           </div>
         </div>
         <div className="row wrap">
+          <Button icon="checkCircle" onClick={() => setHealthOpen(true)}>Health</Button>
+          {project.capabilities.supportNote && <Button icon="rocket" onClick={() => setUpgradeOpen(true)}>Upgrade</Button>}
           <Button icon="history" onClick={() => setHistoryOpen(true)}>History{project.history.length > 0 ? ` (${project.history.length})` : ''}</Button>
           <Button icon="hammer" onClick={runBuild} disabled={run?.running || !project.capabilities.canBuild} title={project.capabilities.buildNote ?? undefined}>Check build</Button>
           <Button variant="primary" icon="plus" onClick={() => setEditor({ mode: 'add' })}>Add endpoint</Button>
@@ -158,10 +168,21 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
       </div>
 
       {project.warnings.map(w => <div key={w} style={{ marginBottom: 14 }}><Alert kind="warning">{w}</Alert></div>)}
-      {project.capabilities.supportNote && <div style={{ marginBottom: 14 }}><Alert kind="info">{project.capabilities.supportNote}</Alert></div>}
+      {project.capabilities.supportNote && (
+        <div style={{ marginBottom: 14 }}>
+          <Alert kind="info">
+            <div className="row wrap" style={{ justifyContent: 'space-between' }}>
+              <span>{project.capabilities.supportNote}</span>
+              {project.capabilities.platform !== 'NetFramework' && <Button size="sm" icon="rocket" onClick={() => setUpgradeOpen(true)}>Upgrade assistant</Button>}
+            </div>
+          </Alert>
+        </div>
+      )}
       {project.capabilities.buildNote && <div style={{ marginBottom: 14 }}><Alert kind="warning">{project.capabilities.buildNote}</Alert></div>}
 
       <RunBar run={run} busy={busy} onToggle={toggleRun} onExport={exportPostman} canRun={project.capabilities.canRun} runNote={project.capabilities.runNote} framework={project.capabilities.platform === 'NetFramework'} />
+
+      <SolutionStructure project={project} />
 
       <div className="stats">
         <div className="card stat">
@@ -207,7 +228,10 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
               <Icon name={isCollapsed ? 'chevronRight' : 'chevronDown'} size={16} />
               <div className="group-icon"><Icon name={group.style === 'Controller' ? 'layers' : 'zap'} size={16} /></div>
               <div className="grow">
-                <div className="group-title">{group.name}</div>
+                <div className="row gap-6">
+                  <span className="group-title">{group.name}</span>
+                  {endpoints[0] && endpoints[0].project !== project.name && <span className="badge" title="These endpoints come from a library project used by this API">from {endpoints[0].project}</span>}
+                </div>
                 <div className="tiny subtle"><span className="mono">{group.baseRoute}</span> · {endpoints.length} endpoint{endpoints.length === 1 ? '' : 's'}</div>
               </div>
               <Button size="sm" variant="ghost" icon="plus" onClick={e => { e.stopPropagation(); setEditor({ mode: 'add', groupKey: group.key }) }}>Add here</Button>
@@ -262,9 +286,83 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
       )}
 
       {build && <BuildDialog result={build} onClose={() => setBuild(null)} onRetry={runBuild} />}
+      {healthOpen && <HealthDialog path={path} onClose={() => setHealthOpen(false)} onOpenEndpoint={id => { setSelected(id); setDrawerTab('overview') }} onUpgrade={() => setUpgradeOpen(true)} />}
+      {upgradeOpen && <UpgradeDialog project={project} onClose={() => setUpgradeOpen(false)} onDone={(p, msg) => applyChange(p, msg)} />}
       {historyOpen && <HistoryDialog history={project.history} onClose={() => setHistoryOpen(false)} onUndo={async () => { await undo(); }} />}
     </div>
   )
+}
+
+function SolutionStructure({ project }: { project: ProjectDetails }) {
+  const [open, setOpen] = useState(false)
+  const refs = project.referencedProjects
+  if (refs.length === 0 && project.binaryReferences.length === 0 && project.services.length === 0) return null
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="group-header" onClick={() => setOpen(o => !o)} style={{ borderBottom: open ? undefined : 'none' }}>
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={16} />
+        <div className="group-icon"><Icon name="layers" size={16} /></div>
+        <div className="grow">
+          <div className="group-title">How this API is built</div>
+          <div className="tiny subtle">
+            Uses {refs.length} project{refs.length === 1 ? '' : 's'}
+            {project.services.length > 0 && <> · {project.services.length} service{project.services.length === 1 ? '' : 's'}</>}
+            {project.binaryReferences.length > 0 && <> · {project.binaryReferences.length} shared DLL{project.binaryReferences.length === 1 ? '' : 's'}</>}
+          </div>
+        </div>
+        <div className="row wrap gap-4">
+          {refs.slice(0, 4).map(r => <span key={r.path} className="chip">{r.role}: {r.name}</span>)}
+        </div>
+      </div>
+      {open && (
+        <div className="col gap-16" style={{ padding: 16 }}>
+          {refs.length > 0 && (
+            <div>
+              <div className="label" style={{ marginBottom: 8 }}>Projects it uses</div>
+              <div className="row wrap gap-6">
+                {refs.map(r => (
+                  <a key={r.path} className="chip" href={href({ page: 'project', path: r.path })} title={r.path} style={{ height: 26 }}>
+                    <Icon name={r.role === 'Services' ? 'zap' : r.role === 'Models' ? 'box' : r.role === 'Data access' ? 'database' : 'file'} size={12} />
+                    {r.name} <span className="subtle">· {r.role}{r.framework ? ` · ${r.framework}` : ''}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+          {project.services.length > 0 && (
+            <div>
+              <div className="label" style={{ marginBottom: 8 }}>Services the endpoints call</div>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Service</th><th>Implemented by</th><th>Project</th><th>Operations</th></tr></thead>
+                  <tbody>
+                    {project.services.map(s => (
+                      <tr key={s.interface + s.project}>
+                        <td className="strong">{splitWords(s.interface.replace(/^I(?=[A-Z])/, ''))}</td>
+                        <td>{s.implementation ? splitWords(s.implementation) : <span className="subtle">Not found</span>}</td>
+                        <td className="small muted">{s.project}</td>
+                        <td>{s.methods}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {project.binaryReferences.length > 0 && (
+            <div>
+              <div className="label" style={{ marginBottom: 8 }}>Shared libraries (prebuilt DLLs)</div>
+              <div className="row wrap gap-6">{project.binaryReferences.map(b => <span key={b} className="chip">{b}</span>)}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function fileName(p: string) {
+  return (p.split(/[\\/]/).pop() ?? p).replace(/\.slnx?$/i, '')
 }
 
 function RunBar({ run, busy, onToggle, onExport, canRun, runNote, framework }: {

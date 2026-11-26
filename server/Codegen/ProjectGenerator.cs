@@ -13,7 +13,7 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
     private const string Nl = "\r\n";
 
     /// <summary>Package versions that are known to work with each .NET version.</summary>
-    public sealed record TargetPackages(int Major, string EfSqlServer, string Pomelo, string? OpenApi, string? Scalar, string? Swashbuckle)
+    public sealed record TargetPackages(int Major, string EfSqlServer, string Pomelo, string Npgsql, string OracleEf, string? OpenApi, string? Scalar, string? Swashbuckle)
     {
         public string Tfm => $"net{Major}.0";
         public int EfMajor => int.Parse(EfSqlServer.Split('.')[0]);
@@ -23,12 +23,13 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
 
     public static readonly Dictionary<int, TargetPackages> SupportedTargets = new()
     {
-        [6] = new(6, "7.0.20", "7.0.0", null, null, "6.9.0"),
-        [7] = new(7, "7.0.20", "7.0.0", null, null, "6.9.0"),
-        [8] = new(8, "8.0.34", "8.0.3", null, null, "6.9.0"),
-        [9] = new(9, "9.0.23", "9.0.0", "9.0.23", "2.21.0", null), // Scalar 3.x needs .NET 10+
-        [10] = new(10, "10.0.15", "9.0.0", "10.0.15", "3.2.1", null),
-        [11] = new(11, "11.0.0", "9.0.0", "11.0.0", "3.2.1", null),
+        //          EF Core (SQL Server & SQLite), Pomelo (MySQL), Npgsql (PostgreSQL), Oracle EF, OpenAPI, Scalar, Swashbuckle
+        [6] = new(6, "7.0.20", "7.0.0", "7.0.18", "7.21.13", null, null, "6.9.0"),
+        [7] = new(7, "7.0.20", "7.0.0", "7.0.18", "7.21.13", null, null, "6.9.0"),
+        [8] = new(8, "8.0.34", "8.0.3", "8.0.11", "8.23.26400", null, null, "6.9.0"),
+        [9] = new(9, "9.0.23", "9.0.0", "9.0.4", "9.23.26400", "9.0.23", "2.21.0", null), // Scalar 3.x needs .NET 10+
+        [10] = new(10, "10.0.15", "9.0.0", "10.0.4", "10.23.26400", "10.0.15", "3.2.1", null),
+        [11] = new(11, "11.0.0", "9.0.0", "11.0.0", "10.23.26400", "11.0.0", "3.2.1", null),
     };
 
     private sealed record EntityPlan(DbTable Table, string ClassName, string SetName, List<(DbColumn Column, string Property)> Props, List<string> Operations);
@@ -71,7 +72,7 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
             foreach (var raw in table.Columns.Where(c => c.Supported))
             {
                 // DateOnly/TimeOnly are mapped natively from EF Core 8; older versions use DateTime/TimeSpan
-                var col = target.EfMajor < 8 && raw.ClrType is "DateOnly" or "TimeOnly"
+                var col = req.Connection.Provider == DbProvider.SqlServer && target.EfMajor < 8 && raw.ClrType is "DateOnly" or "TimeOnly"
                     ? raw with { ClrType = raw.ClrType == "DateOnly" ? "DateTime" : "TimeSpan" }
                     : raw;
                 var p = Identifier(col.Name);
@@ -107,7 +108,7 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
             Write(Path.Combine("Properties", "launchSettings.json"), LaunchSettings(req.IncludeApiDocs, target));
             Write(".gitignore", "bin/" + Nl + "obj/" + Nl + ".vs/" + Nl + "*.user" + Nl);
             Write(Path.Combine("Data", "AppDbContext.cs"), DbContextCs(ns, plans, req.Connection.Provider));
-            foreach (var p in plans) Write(Path.Combine("Entities", p.ClassName + ".cs"), EntityCs(ns, p));
+            foreach (var p in plans) Write(Path.Combine("Entities", p.ClassName + ".cs"), EntityCs(ns, p, req.Connection.Provider));
             Write("README.md", Readme(name, req, plans, target));
 
             // ---- Endpoints, added through the same engine the editor uses ----
@@ -184,10 +185,15 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
         sb.Append("  <ItemGroup>").Append(Nl);
         if (target.BuiltInOpenApi)
             sb.Append($"    <PackageReference Include=\"Microsoft.AspNetCore.OpenApi\" Version=\"{target.OpenApi}\" />").Append(Nl);
-        if (req.Connection.Provider == DbProvider.SqlServer)
-            sb.Append($"    <PackageReference Include=\"Microsoft.EntityFrameworkCore.SqlServer\" Version=\"{target.EfSqlServer}\" />").Append(Nl);
-        else
-            sb.Append($"    <PackageReference Include=\"Pomelo.EntityFrameworkCore.MySql\" Version=\"{target.Pomelo}\" />").Append(Nl);
+        var (package, version) = req.Connection.Provider switch
+        {
+            DbProvider.SqlServer => ("Microsoft.EntityFrameworkCore.SqlServer", target.EfSqlServer),
+            DbProvider.MySql => ("Pomelo.EntityFrameworkCore.MySql", target.Pomelo),
+            DbProvider.PostgreSql => ("Npgsql.EntityFrameworkCore.PostgreSQL", target.Npgsql),
+            DbProvider.Oracle => ("Oracle.EntityFrameworkCore", target.OracleEf),
+            _ => ("Microsoft.EntityFrameworkCore.Sqlite", target.EfSqlServer),
+        };
+        sb.Append($"    <PackageReference Include=\"{package}\" Version=\"{version}\" />").Append(Nl);
         if (req.IncludeApiDocs && target.BuiltInOpenApi)
             sb.Append($"    <PackageReference Include=\"Scalar.AspNetCore\" Version=\"{target.Scalar}\" />").Append(Nl);
         if (req.IncludeApiDocs && !target.BuiltInOpenApi)
@@ -210,6 +216,20 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
         if (req.Connection.Provider == DbProvider.SqlServer)
         {
             l.Add("builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));");
+        }
+        else if (req.Connection.Provider == DbProvider.PostgreSql)
+        {
+            l.Add("// Accept dates without a time zone, as most APIs send them (otherwise PostgreSQL rejects them for timestamptz columns)");
+            l.Add("AppContext.SetSwitch(\"Npgsql.EnableLegacyTimestampBehavior\", true);");
+            l.Add("builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));");
+        }
+        else if (req.Connection.Provider == DbProvider.Oracle)
+        {
+            l.Add("builder.Services.AddDbContext<AppDbContext>(options => options.UseOracle(connectionString));");
+        }
+        else if (req.Connection.Provider == DbProvider.Sqlite)
+        {
+            l.Add("builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));");
         }
         else
         {
@@ -302,7 +322,7 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
         foreach (var p in plans)
         {
             // For MySQL the "schema" is the database itself, so it isn't passed.
-            var schemaArg = provider == DbProvider.SqlServer && p.Table.Schema.Length > 0 ? $", {Lit(p.Table.Schema)}" : "";
+            var schemaArg = provider is DbProvider.SqlServer or DbProvider.PostgreSql or DbProvider.Oracle && p.Table.Schema.Length > 0 ? $", {Lit(p.Table.Schema)}" : "";
             var keys = p.Props.Where(x => x.Column.IsPrimaryKey).Select(x => x.Property).ToList();
             var chain = new List<string>();
             chain.Add(p.Table.IsView ? $".ToView({Lit(p.Table.Name)}{schemaArg})" : $".ToTable({Lit(p.Table.Name)}{schemaArg})");
@@ -315,7 +335,7 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
         return string.Join(Nl, l) + Nl;
     }
 
-    private static string EntityCs(string ns, EntityPlan p)
+    private static string EntityCs(string ns, EntityPlan p, DbProvider provider)
     {
         var l = new List<string>
         {
@@ -345,7 +365,10 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
                 if (col.SqlType is "timestamp" or "rowversion") l.Add("    [Timestamp]");
                 else l.Add("    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]");
             }
-            if (prop != col.Name) l.Add($"    [Column({Lit(col.Name)})]");
+            // PostgreSQL needs to know about special column types it can't convert from text on its own
+            var typeName = provider == DbProvider.PostgreSql && col.SqlType is "json" or "jsonb" or "xml" or "citext" or "inet" or "cidr" ? col.SqlType : null;
+            if (prop != col.Name || typeName is not null)
+                l.Add(typeName is null ? $"    [Column({Lit(col.Name)})]" : $"    [Column({Lit(col.Name)}, TypeName = {Lit(typeName)})]");
             if (col.ClrType == "string" && col.MaxLength is > 0) l.Add($"    [MaxLength({col.MaxLength})]");
             var isRef = col.ClrType is "string" or "byte[]";
             var nullable = col.Nullable || col.IsComputed && isRef;
@@ -361,7 +384,11 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
     {
         var sb = new StringBuilder();
         sb.Append($"# {name}").Append(Nl).Append(Nl);
-        sb.Append($"Web API generated by Endpoint Studio from the `{req.Connection.Database}` database ").Append(req.Connection.Provider == DbProvider.SqlServer ? "(SQL Server)." : "(MySQL).").Append(Nl).Append(Nl);
+        var providerName = req.Connection.Provider switch
+        {
+            DbProvider.SqlServer => "SQL Server", DbProvider.MySql => "MySQL", DbProvider.PostgreSql => "PostgreSQL", DbProvider.Oracle => "Oracle", _ => "SQLite",
+        };
+        sb.Append($"Web API generated by Endpoint Studio from the `{req.Connection.Database ?? Path.GetFileName(req.Connection.Server)}` database ({providerName}).").Append(Nl).Append(Nl);
         sb.Append("## Run").Append(Nl).Append(Nl).Append("```").Append(Nl).Append("dotnet run").Append(Nl).Append("```").Append(Nl).Append(Nl);
         sb.Append($"Target framework: .NET {target.Major}.").Append(Nl).Append(Nl);
         if (req.IncludeApiDocs) sb.Append($"Interactive API docs are served at `/{(target.BuiltInOpenApi ? "scalar" : "swagger")}`.").Append(Nl).Append(Nl);
@@ -378,7 +405,10 @@ public class ProjectGenerator(DatabaseService db, EndpointWriter writer, History
 
     public static string Identifier(string raw)
     {
-        var pascal = ProjectAnalyzer.ToPascal(raw);
+        // Oracle-style CUST_NAME and PostgreSQL-style cust_name both become CustName; mixed case (OrderID) is kept.
+        var words = Regex.Split(raw, @"[^A-Za-z0-9]+").Where(w => w.Length > 0)
+            .Select(w => w.Length > 1 && w.All(ch => !char.IsLetter(ch) || char.IsUpper(ch)) ? w.ToLowerInvariant() : w);
+        var pascal = string.Concat(words.Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
         if (pascal.Length == 0) return "";
         if (char.IsDigit(pascal[0])) pascal = "N" + pascal;
         return pascal;

@@ -4,7 +4,7 @@ import { FolderPicker } from '../components/FolderPicker'
 import { Icon } from '../components/Icon'
 import { Alert, Button, Choice, Field, Spinner, Switch, errorText } from '../components/ui'
 import { href, navigate } from '../router'
-import type { DbConnectionInfo, DbTable, EndpointStyle, GenerateProjectResult, TargetOption } from '../types'
+import type { DbConnectionInfo, DbProvider, DbTable, EndpointStyle, GenerateProjectResult, TargetOption } from '../types'
 
 const OPS = [
   { id: 'list', label: 'List', needsKey: false },
@@ -15,7 +15,13 @@ const OPS = [
 ] as const
 
 const CONN_KEY = 'es-last-connection'
-const STEPS = ['Connect', 'Database', 'Tables', 'Settings']
+const PROVIDERS: { id: DbProvider; title: string; desc: string; port: number | null; user: string }[] = [
+  { id: 'SqlServer', title: 'SQL Server', desc: 'SQL Server, LocalDB or Azure SQL', port: null, user: '' },
+  { id: 'PostgreSql', title: 'PostgreSQL', desc: 'PostgreSQL, Supabase, Neon and others', port: 5432, user: 'postgres' },
+  { id: 'MySql', title: 'MySQL', desc: 'MySQL or MariaDB', port: 3306, user: 'root' },
+  { id: 'Oracle', title: 'Oracle', desc: 'Oracle Database 12c or newer', port: 1521, user: '' },
+  { id: 'Sqlite', title: 'SQLite', desc: 'A database stored in one file', port: null, user: '' },
+]
 
 type Selection = Record<string, string[]> // "schema.name" -> operations
 
@@ -41,6 +47,10 @@ export function NewProjectPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [picker, setPicker] = useState(false)
+  const [filePicker, setFilePicker] = useState(false)
+  const isOracle = conn.provider === 'Oracle'
+  const isSqlite = conn.provider === 'Sqlite'
+  const steps = ['Connect', isOracle ? 'Schema' : 'Database', 'Tables', 'Settings']
   const [result, setResult] = useState<GenerateProjectResult | null>(null)
   const [generating, setGenerating] = useState(false)
 
@@ -62,8 +72,22 @@ export function NewProjectPage() {
       setDatabases(r.databases)
       setServerVersion(r.version)
       try { localStorage.setItem(CONN_KEY, JSON.stringify({ ...conn, password: '', database: null })) } catch { /* ignore */ }
-      setStep(1)
+      if (conn.provider === 'Sqlite') await chooseDb(r.databases[0] ?? 'main') // a SQLite file is a single database
+      else setStep(1)
     } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+  }
+
+  const pickProvider = (id: DbProvider) => {
+    const info = PROVIDERS.find(x => x.id === id)!
+    if (id === conn.provider) return
+    set({
+      provider: id,
+      port: info.port,
+      integratedSecurity: id === 'SqlServer',
+      username: info.user || (id === 'SqlServer' ? '' : conn.username ?? ''),
+      server: id === 'Sqlite' ? '' : conn.provider === 'Sqlite' || !conn.server ? 'localhost' : conn.server,
+      serviceName: id === 'Oracle' ? conn.serviceName ?? '' : null,
+    })
   }
 
   const chooseDb = async (db: string) => {
@@ -122,7 +146,7 @@ export function NewProjectPage() {
       <p className="muted" style={{ marginBottom: 22 }}>Pick the tables you want and Endpoint Studio creates a complete, ready-to-run ASP.NET Core project with endpoints to read and change your data.</p>
 
       <div className="stepper">
-        {STEPS.map((s, i) => (
+        {steps.map((s, i) => (
           <span key={s} className="row gap-6">
             {i > 0 && <span className="step-line" />}
             <span className={`step${i === step ? ' active' : i < step ? ' done' : ''}`}>
@@ -137,40 +161,55 @@ export function NewProjectPage() {
       {step === 0 && (
         <div className="card pad col gap-20">
           <Field label="Database type">
-            <div className="choices" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
-              <Choice icon="database" title="SQL Server" desc="Microsoft SQL Server, LocalDB or Azure SQL" selected={conn.provider === 'SqlServer'} onClick={() => set({ provider: 'SqlServer', port: null, integratedSecurity: true, server: conn.provider === 'SqlServer' ? conn.server : 'localhost' })} />
-              <Choice icon="database" title="MySQL" desc="MySQL or MariaDB" selected={conn.provider === 'MySql'} onClick={() => set({ provider: 'MySql', integratedSecurity: false, username: conn.username || 'root', server: conn.provider === 'MySql' ? conn.server : 'localhost' })} />
+            <div className="choices" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+              {PROVIDERS.map(pv => <Choice key={pv.id} icon="database" title={pv.title} desc={pv.desc} selected={conn.provider === pv.id} onClick={() => pickProvider(pv.id)} />)}
             </div>
           </Field>
-          <div className="grid-2">
-            <Field label="Server" hint={conn.provider === 'SqlServer' ? 'e.g. localhost, .\\SQLEXPRESS or (localdb)\\MSSQLLocalDB' : 'e.g. localhost'}>
-              <input className="input" value={conn.server} onChange={e => set({ server: e.target.value })} />
+          {isSqlite ? (
+            <Field label="Database file" hint="The .db, .sqlite or .sqlite3 file. The generated API will use this file.">
+              <div className="row gap-6">
+                <input className="input grow" value={conn.server} onChange={e => set({ server: e.target.value })} placeholder="C:\data\app.db" />
+                <Button icon="folder" onClick={() => setFilePicker(true)}>Browse</Button>
+              </div>
             </Field>
-            <Field label="Port" hint={conn.provider === 'SqlServer' ? 'Leave empty for the default' : 'Default is 3306'}>
-              <input className="input" inputMode="numeric" value={conn.port ?? ''} onChange={e => set({ port: e.target.value ? Number(e.target.value.replace(/\D/g, '')) || null : null })} placeholder={conn.provider === 'SqlServer' ? '1433' : '3306'} />
-            </Field>
-          </div>
-          {conn.provider === 'SqlServer' && (
-            <Switch checked={conn.integratedSecurity} onChange={v => set({ integratedSecurity: v })} label="Sign in with my Windows account" />
-          )}
-          {!conn.integratedSecurity && (
-            <div className="grid-2">
-              <Field label="Username"><input className="input" value={conn.username ?? ''} onChange={e => set({ username: e.target.value })} autoComplete="username" /></Field>
-              <Field label="Password"><input className="input" type="password" value={conn.password ?? ''} onChange={e => set({ password: e.target.value })} autoComplete="current-password" /></Field>
-            </div>
+          ) : (
+            <>
+              <div className="grid-2">
+                <Field label={isOracle ? 'Host' : 'Server'} hint={conn.provider === 'SqlServer' ? 'e.g. localhost, .\\SQLEXPRESS or (localdb)\\MSSQLLocalDB' : 'e.g. localhost or db.company.com'}>
+                  <input className="input" value={conn.server} onChange={e => set({ server: e.target.value })} />
+                </Field>
+                <Field label="Port" hint={conn.provider === 'SqlServer' ? 'Leave empty for the default' : `Default is ${PROVIDERS.find(x => x.id === conn.provider)?.port}`}>
+                  <input className="input" inputMode="numeric" value={conn.port ?? ''} onChange={e => set({ port: e.target.value ? Number(e.target.value.replace(/\D/g, '')) || null : null })} placeholder={String(PROVIDERS.find(x => x.id === conn.provider)?.port ?? 1433)} />
+                </Field>
+              </div>
+              {isOracle && (
+                <Field label="Service name" hint="The database service, for example ORCLPDB1, XEPDB1 or FREEPDB1. Ask your DBA if you're not sure.">
+                  <input className="input" value={conn.serviceName ?? ''} onChange={e => set({ serviceName: e.target.value })} placeholder="ORCLPDB1" />
+                </Field>
+              )}
+              {conn.provider === 'SqlServer' && (
+                <Switch checked={conn.integratedSecurity} onChange={v => set({ integratedSecurity: v })} label="Sign in with my Windows account" />
+              )}
+              {!conn.integratedSecurity && (
+                <div className="grid-2">
+                  <Field label="Username"><input className="input" value={conn.username ?? ''} onChange={e => set({ username: e.target.value })} autoComplete="username" /></Field>
+                  <Field label="Password"><input className="input" type="password" value={conn.password ?? ''} onChange={e => set({ password: e.target.value })} autoComplete="current-password" /></Field>
+                </div>
+              )}
+            </>
           )}
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <Button variant="primary" icon="zap" loading={busy} onClick={connect} disabled={!conn.server.trim()}>Connect</Button>
+            <Button variant="primary" icon="zap" loading={busy} onClick={connect} disabled={!conn.server.trim() || (isOracle && !conn.serviceName?.trim())}>{isSqlite ? 'Open database' : 'Connect'}</Button>
           </div>
         </div>
       )}
 
       {step === 1 && (
-        <DatabaseStep databases={databases} version={serverVersion} busy={busy} onBack={() => setStep(0)} onPick={chooseDb} />
+        <DatabaseStep databases={databases} version={serverVersion} busy={busy} onBack={() => setStep(0)} onPick={chooseDb} oracle={isOracle} />
       )}
 
       {step === 2 && (
-        <TablesStep tables={tables} selection={selection} onChange={setSelection} database={conn.database!} onBack={() => setStep(1)} onNext={() => setStep(3)} />
+        <TablesStep tables={tables} selection={selection} onChange={setSelection} database={conn.database!} onBack={() => setStep(isSqlite ? 0 : 1)} onNext={() => setStep(3)} />
       )}
 
       {step === 3 && (
@@ -227,26 +266,27 @@ export function NewProjectPage() {
         </div>
       )}
 
+      {filePicker && <FolderPicker mode="file" extensions=".db,.sqlite,.sqlite3,.db3" onPick={p => { set({ server: p }); setFilePicker(false) }} onClose={() => setFilePicker(false)} />}
       {picker && <FolderPicker mode="folder" initialPath={location || null} onPick={p => { setLocation(p); setPicker(false) }} onClose={() => setPicker(false)} />}
     </div>
   )
 }
 
-function DatabaseStep({ databases, version, busy, onBack, onPick }: { databases: string[]; version: string; busy: boolean; onBack: () => void; onPick: (db: string) => void }) {
+function DatabaseStep({ databases, version, busy, onBack, onPick, oracle }: { databases: string[]; version: string; busy: boolean; onBack: () => void; onPick: (db: string) => void; oracle: boolean }) {
   const [filter, setFilter] = useState('')
   const list = databases.filter(d => d.toLowerCase().includes(filter.toLowerCase()))
   return (
     <div className="card pad col gap-16">
       <div className="row between wrap">
         <div>
-          <div className="strong">Choose a database</div>
+          <div className="strong">{oracle ? 'Choose a schema' : 'Choose a database'}</div>
           <div className="small subtle">Connected · server version {version}</div>
         </div>
         {busy && <Spinner />}
       </div>
       {databases.length > 6 && <input className="input" placeholder="Filter databases…" value={filter} onChange={e => setFilter(e.target.value)} autoFocus />}
       {databases.length === 0 ? (
-        <Alert kind="warning">No databases were found on this server, or this login can’t see any.</Alert>
+        <Alert kind="warning">{oracle ? 'No schemas with tables were found for this login.' : 'No databases were found on this server, or this login can’t see any.'}</Alert>
       ) : (
         <div className="choices">
           {list.map(d => <Choice key={d} icon="database" title={d} onClick={() => !busy && onPick(d)} />)}

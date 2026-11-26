@@ -11,8 +11,9 @@ function lastFolder(): string | null {
 }
 
 /** Lets the user browse their computer to pick a .NET project or a folder. */
-export function FolderPicker({ mode, onPick, onClose, initialPath }: {
-  mode: 'project' | 'folder'
+export function FolderPicker({ mode, onPick, onClose, initialPath, extensions }: {
+  mode: 'project' | 'folder' | 'file'
+  extensions?: string
   onPick: (path: string) => void
   onClose: () => void
   initialPath?: string | null
@@ -35,7 +36,7 @@ export function FolderPicker({ mode, onPick, onClose, initialPath }: {
   const load = async (path: string | null) => {
     setLoading(true); setError(null); setScan(null); setFilter(''); setOpenSln(null)
     try {
-      const r = await api.browse(path)
+      const r = await api.browse(path, mode === 'file' ? extensions : undefined)
       setData(r)
       if (r.path) try { localStorage.setItem(LAST_KEY, r.path) } catch { /* ignore */ }
     } catch (e) {
@@ -57,9 +58,9 @@ export function FolderPicker({ mode, onPick, onClose, initialPath }: {
 
   return (
     <Modal
-      title={mode === 'project' ? 'Open a .NET project' : 'Choose a folder'}
-      subtitle={mode === 'project' ? 'Browse to the folder of your API project. Projects are highlighted.' : 'Pick where the new project will be created.'}
-      icon={mode === 'project' ? 'folderOpen' : 'folder'}
+      title={mode === 'project' ? 'Open a .NET project' : mode === 'file' ? 'Choose a database file' : 'Choose a folder'}
+      subtitle={mode === 'project' ? 'Browse to the folder of your API project or solution. Projects and solutions are highlighted.' : mode === 'file' ? 'Database files are highlighted.' : 'Pick where the new project will be created.'}
+      icon={mode === 'project' ? 'folderOpen' : mode === 'file' ? 'database' : 'folder'}
       onClose={onClose}
       size="wide"
       footer={<>
@@ -107,13 +108,21 @@ export function FolderPicker({ mode, onPick, onClose, initialPath }: {
             <Icon name="arrowLeft" size={16} /><span className="muted">Up one level</span>
           </div>
         )}
+        {mode === 'file' && data?.files?.map(f => (
+          <div key={f.path} className="folder-item project" onClick={() => onPick(f.path)}>
+            <Icon name="database" size={17} />
+            <span className="strong grow truncate">{f.name}</span>
+            <span className="tiny subtle">{formatSize(f.size)}</span>
+            <Icon name="arrowRight" size={15} />
+          </div>
+        ))}
         {mode === 'project' && data?.projects.map(p => <ProjectRow key={p.path} p={p} onPick={onPick} />)}
         {mode === 'project' && data?.solutions.map(sln => (
           <div key={sln.path}>
             <div className="folder-item project" onClick={() => toggleSolution(sln)}>
               <Icon name="layers" size={17} />
               <span className="strong grow truncate">{sln.name}</span>
-              <span className="badge">Solution</span>
+              <Button size="sm" variant="primary" onClick={e => { e.stopPropagation(); onPick(sln.path) }}>Open solution</Button>
               <Icon name={openSln?.sln.path === sln.path ? 'chevronDown' : 'chevronRight'} size={15} />
             </div>
             {openSln?.sln.path === sln.path && (
@@ -132,7 +141,7 @@ export function FolderPicker({ mode, onPick, onClose, initialPath }: {
             <Icon name="chevronRight" size={15} />
           </div>
         ))}
-        {data && !loading && folders.length === 0 && (data.projects.length + data.solutions.length === 0 || mode === 'folder') && (
+        {data && !loading && folders.length === 0 && (mode === 'project' ? data.projects.length + data.solutions.length === 0 : mode === 'file' ? !data.files?.length : true) && (
           <div className="folder-item subtle" style={{ cursor: 'default' }}>This folder is empty.</div>
         )}
       </div>
@@ -152,6 +161,12 @@ function ProjectRow({ p, hint, onPick }: { p: ProjectFileEntry; hint?: string; o
       <Icon name="arrowRight" size={15} />
     </div>
   )
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function buildCrumbs(path: string) {

@@ -5,7 +5,8 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export interface FolderEntry { name: string; path: string }
 export interface ProjectFileEntry { name: string; path: string; framework: string | null; isWeb: boolean }
 export interface SolutionEntry { name: string; path: string }
-export interface BrowseResult { path: string | null; parent: string | null; folders: FolderEntry[]; projects: ProjectFileEntry[]; solutions: SolutionEntry[] }
+export interface FileEntry { name: string; path: string; size: number }
+export interface BrowseResult { path: string | null; parent: string | null; folders: FolderEntry[]; projects: ProjectFileEntry[]; solutions: SolutionEntry[]; files?: FileEntry[] | null }
 
 export interface RecentProject { name: string; path: string; lastOpened: string; endpointCount: number }
 
@@ -13,6 +14,7 @@ export interface EndpointParam { name: string; type: string; source: ParamSource
 
 export interface EndpointInfo {
   id: string
+  project: string
   style: EndpointStyle
   httpMethod: string
   route: string
@@ -40,6 +42,17 @@ export interface EntityInfo {
   keyType: string | null
   properties: EntityProperty[]
 }
+
+export interface ProjectRefInfo { name: string; path: string; framework: string | null; role: string; isWeb: boolean }
+export interface ServiceInfo { interface: string; implementation: string | null; project: string; methods: number }
+export interface SolutionProjectInfo { name: string; path: string; framework: string | null; role: string; isWeb: boolean; references: string[]; endpointCount: number | null; fileCount: number }
+export interface SolutionDetails { name: string; path: string; projects: SolutionProjectInfo[] }
+
+export interface HealthFinding { severity: 'high' | 'medium' | 'low' | 'info'; category: string; title: string; detail: string; items: string[]; endpointIds?: string[] | null }
+export interface HealthReport { score: number; grade: string; findings: HealthFinding[]; checks: number }
+export interface UpgradeStep { project: string; kind: string; title: string; detail: string }
+export interface UpgradePlan { from: string; to: string; targetMajor: number; steps: UpgradeStep[]; warnings: string[]; canApply: boolean; projects: string[] }
+export interface UpgradeRequest { targetMajor: number; includeReferences: boolean }
 
 export interface HistoryEntry { id: string; time: string; description: string }
 
@@ -69,6 +82,10 @@ export interface ProjectDetails {
   packages: string[]
   history: HistoryEntry[]
   warnings: string[]
+  solutionPath: string | null
+  referencedProjects: ProjectRefInfo[]
+  binaryReferences: string[]
+  services: ServiceInfo[]
 }
 
 export interface AddEndpointRequest {
@@ -98,7 +115,7 @@ export interface RunStatus { running: boolean; url: string | null; state: 'start
 export interface TryRequest { method: string; path: string; headers: Record<string, string>; body: string | null }
 export interface TryResponse { status: number; statusText: string; headers: Record<string, string>; body: string; durationMs: number; contentType: string | null }
 
-export type DbProvider = 'SqlServer' | 'MySql'
+export type DbProvider = 'SqlServer' | 'MySql' | 'PostgreSql' | 'Oracle' | 'Sqlite'
 export interface DbConnectionInfo {
   provider: DbProvider
   server: string
@@ -107,6 +124,7 @@ export interface DbConnectionInfo {
   username: string | null
   password: string | null
   database: string | null
+  serviceName?: string | null
 }
 export interface DbColumn { name: string; sqlType: string; clrType: string; nullable: boolean; isPrimaryKey: boolean; isIdentity: boolean; isComputed: boolean; maxLength: number | null; supported: boolean }
 export interface DbTable { schema: string; name: string; columns: DbColumn[]; isView: boolean; rowCount: number | null }
