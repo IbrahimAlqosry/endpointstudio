@@ -1,6 +1,7 @@
 import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
   DeployProfile, DeployRequest, FrontendDetails, InspectResult, RunStatus as FeRunStatus, DeployTools, GenerateProjectResult, HealthReport, JobStatus, SettingChange, SettingsInfo, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
+  DbRef, DbSchema, DdlChange, RowsResult, SavedConnection, SqlResult,
 } from './types'
 
 export class ApiError extends Error {}
@@ -87,4 +88,27 @@ export const api = {
   dbConnect: (info: DbConnectionInfo) => request<{ version: string; databases: string[] }>('POST', '/api/db/connect', info),
   dbTables: (info: DbConnectionInfo) => request<DbTable[]>('POST', '/api/db/tables', info),
   generate: (req: GenerateProjectRequest) => request<GenerateProjectResult>('POST', '/api/db/generate', req),
+
+  // Database Studio
+  dbsConnections: () => request<SavedConnection[]>('GET', '/api/dbs/connections'),
+  dbsSaveConnection: (id: string | null, name: string, info: DbConnectionInfo) => request<SavedConnection>('POST', '/api/dbs/connections', { id, name, info }),
+  dbsDeleteConnection: (id: string) => request<void>('DELETE', `/api/dbs/connections/${encodeURIComponent(id)}`),
+  dbsConnect: (ref: DbRef) => request<{ version: string; databases: string[] }>('POST', '/api/dbs/connect', ref),
+  dbsSchema: (ref: DbRef) => request<DbSchema>('POST', '/api/dbs/schema', ref),
+  dbsScript: (ref: DbRef, schema: string, table: string) => request<{ text: string }>('POST', '/api/dbs/script', { ref, schema, table }).then(r => r.text),
+  dbsRoutine: (ref: DbRef, schema: string, name: string, kind: string) => request<{ text: string }>('POST', '/api/dbs/routine', { ref, schema, name, kind }).then(r => r.text),
+  dbsRows: (ref: DbRef, schema: string, table: string, o: { offset: number; limit: number; orderBy?: string | null; desc?: boolean; search?: string; filters?: Record<string, string> }) =>
+    request<RowsResult>('POST', '/api/dbs/rows', { ref, schema, table, ...o, desc: !!o.desc }),
+  dbsInsert: (ref: DbRef, schema: string, table: string, values: Record<string, string | null>) => request<{ affected: number }>('POST', '/api/dbs/rows/insert', { ref, schema, table, values }),
+  dbsUpdate: (ref: DbRef, schema: string, table: string, keys: Record<string, string | null>, values: Record<string, string | null>) => request<{ affected: number }>('POST', '/api/dbs/rows/update', { ref, schema, table, keys, values }),
+  dbsDelete: (ref: DbRef, schema: string, table: string, keyList: Record<string, string | null>[]) => request<{ affected: number }>('POST', '/api/dbs/rows/delete', { ref, schema, table, keyList }),
+  dbsImport: (ref: DbRef, schema: string, table: string, rows: Record<string, string | null>[]) => request<{ affected: number; ignoredColumns: string[] }>('POST', '/api/dbs/rows/import', { ref, schema, table, rows }),
+  dbsExport: async (ref: DbRef, schema: string, table: string, format: string, search?: string) => {
+    const res = await fetch('/api/dbs/rows/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref, schema, table, format, search }) })
+    if (!res.ok) { let m = 'Export failed.'; try { m = (await res.json()).error ?? m } catch { /* ignore */ } throw new ApiError(m) }
+    return res.blob()
+  },
+  dbsPreview: (ref: DbRef, change: DdlChange) => request<{ statements: string[]; warning: string | null }>('POST', '/api/dbs/ddl/preview', { ref, change }),
+  dbsApply: (ref: DbRef, change: DdlChange) => request<{ statements: string[] }>('POST', '/api/dbs/ddl/apply', { ref, change }),
+  dbsSql: (ref: DbRef, sql: string, dryRun: boolean, confirmed: boolean) => request<SqlResult>('POST', '/api/dbs/sql', { ref, sql, dryRun, confirmed }),
 }

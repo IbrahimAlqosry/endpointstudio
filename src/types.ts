@@ -200,3 +200,25 @@ export interface GenerateProjectRequest {
   includeApiDocs: boolean
 }
 export interface GenerateProjectResult { projectPath: string; createdFiles: string[]; build: BuildResult | null }
+
+// ---------- Database Studio ----------
+export interface DbsColumn { name: string; type: string; nullable: boolean; default: string | null; identity: boolean; primaryKey: boolean; computed: boolean; position: number; maxLength: number | null }
+export interface DbsTable { schema: string; name: string; rows: number | null; columns: DbsColumn[]; primaryKey: string[]; pkName: string | null }
+export interface DbsForeignKey { name: string; schema: string; table: string; columns: string[]; refSchema: string; refTable: string; refColumns: string[]; onDelete: string; onUpdate: string }
+export interface DbsIndex { name: string; schema: string; table: string; unique: boolean; columns: string[] }
+export interface DbsView { schema: string; name: string; definition: string | null }
+export interface DbsRoutine { schema: string; name: string; kind: string }
+export interface DbSchema {
+  provider: DbProvider; database: string; version: string; tables: DbsTable[]; foreignKeys: DbsForeignKey[]; indexes: DbsIndex[]; views: DbsView[]; routines: DbsRoutine[]
+  types: string[]; schemas: string[]; capabilities: { schemas: boolean; alterColumn: boolean; addForeignKey: boolean; routines: boolean; renameColumn: boolean }
+}
+export interface SavedConnection { id: string; name: string; info: DbConnectionInfo; hasPassword: boolean; saved: string }
+export interface DbRef { connectionId?: string | null; connection?: DbConnectionInfo | null; database?: string | null }
+export interface RowsResult { columns: string[]; rows: (string | null)[][]; total: number; keyColumns: string[]; readOnly: boolean }
+export interface DbsColumnDef { name: string; type: string; nullable: boolean; default?: string | null; identity: boolean; primaryKey: boolean }
+export interface DdlChange {
+  kind: string; schema?: string | null; table?: string | null; column?: DbsColumnDef | null; columns?: DbsColumnDef[] | null; oldName?: string | null; newName?: string | null
+  constraintName?: string | null; keyColumns?: string[] | null; refSchema?: string | null; refTable?: string | null; refColumns?: string[] | null; onDelete?: string | null; unique?: boolean; sql?: string | null
+}
+export interface SqlResultSet { columns: string[]; rows: (string | null)[][]; truncated: boolean; affected: number | null; message: string | null }
+export interface SqlResult { results: SqlResultSet[]; durationMs: number; rolledBack: boolean; needsConfirm: string | null }

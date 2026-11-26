@@ -35,7 +35,7 @@ public class DatabaseService
 
     // ------------------------------------------------------------------ Connection strings
 
-    public string ConnectionString(DbConnectionInfo c, bool forApp = false)
+    public string ConnectionString(DbConnectionInfo c, bool forApp = false, bool readWrite = false)
     {
         if (string.IsNullOrWhiteSpace(c.Server))
             throw new StudioException(c.Provider == DbProvider.Sqlite ? "Please choose the database file." : "Please enter the server name.");
@@ -89,18 +89,20 @@ public class DatabaseService
             case DbProvider.Sqlite:
             {
                 var path = Path.GetFullPath(host);
-                return new SqliteConnectionStringBuilder { DataSource = path, Mode = forApp ? SqliteOpenMode.ReadWrite : SqliteOpenMode.ReadOnly }.ConnectionString;
+                var sb = new SqliteConnectionStringBuilder { DataSource = path, Mode = forApp || readWrite ? SqliteOpenMode.ReadWrite : SqliteOpenMode.ReadOnly };
+                if (!forApp) sb.Pooling = false; // the studio must not keep the file locked
+                return sb.ConnectionString;
             }
             default:
                 throw new StudioException("This database type isn't supported.");
         }
     }
 
-    private async Task<DbConnection> OpenAsync(DbConnectionInfo c, CancellationToken ct)
+    public async Task<DbConnection> OpenAsync(DbConnectionInfo c, CancellationToken ct, bool readWrite = false)
     {
         if (c.Provider == DbProvider.Sqlite && !File.Exists(c.Server?.Trim()))
             throw new StudioException("That SQLite database file doesn't exist.");
-        var cs = ConnectionString(c);
+        var cs = ConnectionString(c, readWrite: readWrite);
         DbConnection conn = c.Provider switch
         {
             DbProvider.SqlServer => new SqlConnection(cs),

@@ -9,6 +9,7 @@ import { ProjectPage } from './pages/ProjectPage'
 import { SolutionPage } from './pages/SolutionPage'
 import { RecoverPage } from './pages/RecoverPage'
 import { FrontendPage } from './pages/FrontendPage'
+import { DbStudioPage } from './pages/DbStudioPage'
 import { href, openPath, routeFor, useRoute } from './router'
 import type { RecentProject } from './types'
 
@@ -49,6 +50,7 @@ function Shell() {
         <nav className="nav">
           <a className={`nav-item${route.page === 'home' ? ' active' : ''}`} href={href({ page: 'home' })}><Icon name="home" size={17} /> Home</a>
           <button className="nav-item" onClick={() => setPicker(true)}><Icon name="folderOpen" size={17} /> Open project…</button>
+          <a className={`nav-item${route.page === 'db' ? ' active' : ''}`} href={href({ page: 'db' })}><Icon name="table" size={17} /> Database Studio</a>
           <a className={`nav-item${route.page === 'new' ? ' active' : ''}`} href={href({ page: 'new' })}><Icon name="database" size={17} /> New from database</a>
           <a className={`nav-item${route.page === 'recover' ? ' active' : ''}`} href={href({ page: 'recover' })}><Icon name="wand" size={17} /> Recover code</a>
         </nav>
@@ -95,6 +97,7 @@ function Shell() {
         {route.page === 'solution' && <SolutionPage key={route.path} path={route.path} onChanged={refreshRecent} />}
         {route.page === 'new' && <NewProjectPage />}
         {route.page === 'recover' && <RecoverPage />}
+        {route.page === 'db' && <DbStudioPage key={(route.id ?? '') + (route.database ?? '')} id={route.id} database={route.database} />}
         {route.page === 'frontend' && <FrontendPage key={route.path} path={route.path} onChanged={refreshRecent} />}
       </main>
 

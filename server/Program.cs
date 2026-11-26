@@ -1,3 +1,4 @@
+using Stackwright.Server.Services.Db;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -27,6 +28,7 @@ builder.Services.AddSingleton<SettingsService>();
 builder.Services.AddSingleton<DeployService>();
 builder.Services.AddSingleton<DecompileService>();
 builder.Services.AddSingleton<Stackwright.Server.Services.Frontend.FrontendService>();
+builder.Services.AddSingleton<Stackwright.Server.Services.Db.DbStudioService>();
 
 var app = builder.Build();
 
@@ -220,6 +222,30 @@ api.MapPost("/frontend/undo", (string path, FrontendService fe, HistoryService h
 });
 api.MapGet("/frontend/health", (string path, FrontendService fe) => fe.Health(path));
 
+
+// ---------------------------------------------------------------- Database Studio
+var dbs = api.MapGroup("/dbs");
+dbs.MapGet("/connections", (DbStudioService s) => s.Connections());
+dbs.MapPost("/connections", (SaveConnectionRequest req, DbStudioService s) => s.SaveConnection(req));
+dbs.MapDelete("/connections/{id}", (string id, DbStudioService s) => { s.DeleteConnection(id); return Results.Ok(); });
+dbs.MapPost("/connect", (DbRef r, DbStudioService s, CancellationToken ct) => s.ConnectAsync(r, ct));
+dbs.MapPost("/schema", (DbRef r, DbStudioService s, CancellationToken ct) => s.SchemaAsync(r, ct));
+dbs.MapPost("/script", async (ScriptBody b, DbStudioService s, CancellationToken ct) => new { text = await s.ScriptAsync(b.Ref, b.Schema, b.Table, ct) });
+dbs.MapPost("/routine", async (RoutineRequest req, DbStudioService s, CancellationToken ct) => new { text = await s.RoutineAsync(req, ct) });
+dbs.MapPost("/rows", (RowsRequest req, DbStudioService s, CancellationToken ct) => s.RowsAsync(req, ct));
+dbs.MapPost("/rows/insert", (RowChange req, DbStudioService s, CancellationToken ct) => s.InsertAsync(req, ct));
+dbs.MapPost("/rows/update", (RowChange req, DbStudioService s, CancellationToken ct) => s.UpdateAsync(req, ct));
+dbs.MapPost("/rows/delete", (RowChange req, DbStudioService s, CancellationToken ct) => s.DeleteAsync(req, ct));
+dbs.MapPost("/rows/import", (ImportRequest req, DbStudioService s, CancellationToken ct) => s.ImportAsync(req, ct));
+dbs.MapPost("/rows/export", async (ExportRequest req, DbStudioService s, CancellationToken ct) =>
+{
+    var (content, name, type) = await s.ExportAsync(req, ct);
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(content), type + "; charset=utf-8", name);
+});
+dbs.MapPost("/ddl/preview", (DdlRequest req, DbStudioService s, CancellationToken ct) => s.PreviewAsync(req, ct));
+dbs.MapPost("/ddl/apply", (DdlRequest req, DbStudioService s, CancellationToken ct) => s.ApplyDdlAsync(req, ct));
+dbs.MapPost("/sql", (SqlRequest req, DbStudioService s, CancellationToken ct) => s.RunSqlAsync(req, ct));
+
 // ---------------------------------------------------------------- Database
 api.MapPost("/db/connect", async (DbConnectionInfo info, DatabaseService db, CancellationToken ct) =>
 {
@@ -269,6 +295,7 @@ static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService histo
     m.Services,
     new DataAccessInfo(m.SqlProviders, m.ConnectionStrings));
 
+record ScriptBody(DbRef Ref, string Schema, string Table);
 record PathBody(string Path, int? Line = null);
 record SqlTextBody(string? Sql);
 record NameBody(string Name);
