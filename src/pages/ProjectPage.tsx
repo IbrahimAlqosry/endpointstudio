@@ -3,6 +3,7 @@ import { api } from '../api'
 import { BuildDialog } from '../components/BuildDialog'
 import { EndpointDrawer } from '../components/EndpointDrawer'
 import { EndpointEditor } from '../components/EndpointEditor'
+import { GitPanel } from '../components/GitPanel'
 import { DeployPanel } from '../components/DeployPanel'
 import { HealthDialog } from '../components/HealthDialog'
 import { SettingsPanel } from '../components/SettingsPanel'
@@ -30,7 +31,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
   const [build, setBuild] = useState<BuildResult | 'loading' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
-  const [view, setView] = useState<'endpoints' | 'settings' | 'deploy'>(() => (new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') as 'settings' | 'deploy') || 'endpoints')
+  const [view, setView] = useState<'endpoints' | 'settings' | 'deploy' | 'git'>(() => (new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') as 'settings' | 'deploy' | 'git') || 'endpoints')
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [run, setRun] = useState<RunStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -187,9 +188,11 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
         <button className={`tab${view === 'endpoints' ? ' active' : ''}`} onClick={() => setView('endpoints')}><span className="row gap-6"><Icon name="layers" size={15} />Endpoints <span className="badge" style={{ height: 18 }}>{project.endpoints.length}</span></span></button>
         <button className={`tab${view === 'settings' ? ' active' : ''}`} onClick={() => setView('settings')}><span className="row gap-6"><Icon name="key" size={15} />Settings</span></button>
         <button className={`tab${view === 'deploy' ? ' active' : ''}`} onClick={() => setView('deploy')}><span className="row gap-6"><Icon name="rocket" size={15} />Publish &amp; deploy</span></button>
+        <button className={`tab${view === 'git' ? ' active' : ''}`} onClick={() => setView('git')}><span className="row gap-6"><Icon name="history" size={15} />Source control</span></button>
       </div>
 
       {view === 'settings' && <SettingsPanel path={path} onChanged={load} />}
+      {view === 'git' && <GitPanel path={path} />}
       {view === 'deploy' && <DeployPanel project={{ path: project.path, name: project.name, platform: project.capabilities.platform }} />}
       {view === 'endpoints' && <>
       <RunBar run={run} busy={busy} onToggle={toggleRun} onExport={exportPostman} canRun={project.capabilities.canRun} runNote={project.capabilities.runNote} framework={project.capabilities.platform === 'NetFramework'} />

@@ -29,6 +29,7 @@ builder.Services.AddSingleton<DeployService>();
 builder.Services.AddSingleton<DecompileService>();
 builder.Services.AddSingleton<Stackwright.Server.Services.Frontend.FrontendService>();
 builder.Services.AddSingleton<Stackwright.Server.Services.Db.DbStudioService>();
+builder.Services.AddSingleton<GitService>();
 
 var app = builder.Build();
 
@@ -222,6 +223,44 @@ api.MapPost("/frontend/undo", (string path, FrontendService fe, HistoryService h
 });
 api.MapGet("/frontend/health", (string path, FrontendService fe) => fe.Health(path));
 
+
+
+// ---------------------------------------------------------------- Source control (Git)
+var git = api.MapGroup("/git");
+git.MapGet("/status", (string path, GitService g) => g.Status(path));
+git.MapPost("/init", (GitPathBody b, GitService g) => g.Init(b.Path));
+git.MapPost("/gitignore", (GitPathBody b, GitService g) => { g.AddGitignore(b.Path); return Results.Ok(); });
+git.MapPost("/identity", (GitIdentityBody b, GitService g) => { g.SetIdentity(b); return Results.Ok(); });
+git.MapPost("/trust", (GitPathBody b, GitService g) => { g.Trust(b.Path); return Results.Ok(); });
+git.MapPost("/remote", (GitRemoteBody b, GitService g) => { g.SetRemote(b); return Results.Ok(); });
+git.MapPost("/remote/remove", (GitRemoteBody b, GitService g) => { g.RemoveRemote(b.Path, b.Name); return Results.Ok(); });
+git.MapPost("/stage", (GitFilesBody b, GitService g) => { g.Stage(b); return Results.Ok(); });
+git.MapPost("/unstage", (GitFilesBody b, GitService g) => { g.Unstage(b); return Results.Ok(); });
+git.MapPost("/commit", (GitCommitBody b, GitService g) => g.Commit(b));
+git.MapPost("/discard", (GitFilesBody b, GitService g) => { g.Discard(b); return Results.Ok(); });
+git.MapGet("/diff", (string path, string file, string? commit, GitService g) => g.Diff(path, file, commit));
+git.MapPost("/resolve", (GitResolveBody b, GitService g) => { g.Resolve(b); return Results.Ok(); });
+git.MapPost("/abort", (GitPathBody b, GitService g) => { g.AbortOperation(b.Path); return Results.Ok(); });
+git.MapGet("/log", (string path, int? skip, string? branch, string? search, string? file, GitService g) => g.Log(path, skip ?? 0, branch, search, file));
+git.MapGet("/show", (string path, string hash, GitService g) => g.Show(path, hash));
+git.MapPost("/revert", (GitRefBody b, GitService g) => { g.Revert(b); return Results.Ok(); });
+git.MapPost("/undo-commit", (GitPathBody b, GitService g) => { g.UndoLastCommit(b.Path); return Results.Ok(); });
+git.MapPost("/tag", (GitRefBody b, GitService g) => { g.Tag(b); return Results.Ok(); });
+git.MapGet("/branches", (string path, GitService g) => g.Branches(path));
+git.MapPost("/branch/create", (GitNameBody b, GitService g) => { g.CreateBranch(b); return Results.Ok(); });
+git.MapPost("/branch/checkout", (GitNameBody b, GitService g) => { g.Checkout(b); return Results.Ok(); });
+git.MapPost("/branch/delete", (GitNameBody b, GitService g) => { g.DeleteBranch(b); return Results.Ok(); });
+git.MapPost("/branch/rename", (GitNameBody b, GitService g) => { g.RenameBranch(b); return Results.Ok(); });
+git.MapPost("/merge", (GitNameBody b, GitService g) => g.Merge(b));
+git.MapGet("/stashes", (string path, GitService g) => g.Stashes(path));
+git.MapPost("/stash", (GitRefBody b, GitService g) => { g.Stash(b); return Results.Ok(); });
+git.MapPost("/stash/apply", (GitRefBody b, GitService g) => { g.StashApply(b, false); return Results.Ok(); });
+git.MapPost("/stash/pop", (GitRefBody b, GitService g) => { g.StashApply(b, true); return Results.Ok(); });
+git.MapPost("/stash/drop", (GitRefBody b, GitService g) => { g.StashDrop(b); return Results.Ok(); });
+git.MapPost("/fetch", (GitPathBody b, GitService g) => new { jobId = g.Fetch(b.Path) });
+git.MapPost("/pull", (GitPathBody b, GitService g) => new { jobId = g.Pull(b.Path) });
+git.MapPost("/push", (GitPathBody b, bool? tags, GitService g) => new { jobId = g.Push(b.Path, tags ?? true) });
+git.MapPost("/clone", (GitCloneBody b, GitService g) => new { jobId = g.Clone(b) });
 
 // ---------------------------------------------------------------- Database Studio
 var dbs = api.MapGroup("/dbs");

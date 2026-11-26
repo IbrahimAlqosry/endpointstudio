@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
 import { Icon } from './components/Icon'
 import { FolderPicker } from './components/FolderPicker'
+import { CloneDialog } from './components/GitPanel'
 import { ConfirmProvider, Segmented, ToastProvider, useTheme, type Theme } from './components/ui'
 import { HomePage } from './pages/HomePage'
 import { NewProjectPage } from './pages/NewProjectPage'
@@ -29,6 +30,10 @@ function Shell() {
   const [recent, setRecent] = useState<RecentProject[]>([])
   const [picker, setPicker] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [cloneOpen, setCloneOpen] = useState(false)
+  const [pickerStart, setPickerStart] = useState<string | undefined>()
+  const [defaultFolder, setDefaultFolder] = useState('')
+  useEffect(() => { api.system().then(s => setDefaultFolder(s.defaultLocation)).catch(() => {}) }, [])
 
   const refreshRecent = useCallback(() => { api.recent().then(setRecent).catch(() => {}) }, [])
   useEffect(() => { refreshRecent() }, [refreshRecent, route])
@@ -49,7 +54,8 @@ function Shell() {
 
         <nav className="nav">
           <a className={`nav-item${route.page === 'home' ? ' active' : ''}`} href={href({ page: 'home' })}><Icon name="home" size={17} /> Home</a>
-          <button className="nav-item" onClick={() => setPicker(true)}><Icon name="folderOpen" size={17} /> Open project…</button>
+          <button className="nav-item" onClick={() => { setPickerStart(undefined); setPicker(true) }}><Icon name="folderOpen" size={17} /> Open project…</button>
+          <button className="nav-item" onClick={() => setCloneOpen(true)}><Icon name="download" size={17} /> Copy from Git…</button>
           <a className={`nav-item${route.page === 'db' ? ' active' : ''}`} href={href({ page: 'db' })}><Icon name="table" size={17} /> Database Studio</a>
           <a className={`nav-item${route.page === 'new' ? ' active' : ''}`} href={href({ page: 'new' })}><Icon name="database" size={17} /> New from database</a>
           <a className={`nav-item${route.page === 'recover' ? ' active' : ''}`} href={href({ page: 'recover' })}><Icon name="wand" size={17} /> Recover code</a>
@@ -101,7 +107,8 @@ function Shell() {
         {route.page === 'frontend' && <FrontendPage key={route.path} path={route.path} onChanged={refreshRecent} />}
       </main>
 
-      {picker && <FolderPicker mode="project" onPick={openProject} onClose={() => setPicker(false)} />}
+      {picker && <FolderPicker mode="project" initialPath={pickerStart} onPick={openProject} onClose={() => setPicker(false)} />}
+      {cloneOpen && <CloneDialog defaultFolder={defaultFolder} onClose={() => setCloneOpen(false)} onCloned={folder => { setCloneOpen(false); setPickerStart(folder); setPicker(true) }} />}
     </div>
   )
 }

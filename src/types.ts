@@ -222,3 +222,17 @@ export interface DdlChange {
 }
 export interface SqlResultSet { columns: string[]; rows: (string | null)[][]; truncated: boolean; affected: number | null; message: string | null }
 export interface SqlResult { results: SqlResultSet[]; durationMs: number; rolledBack: boolean; needsConfirm: string | null }
+
+// ---------- Source control ----------
+export interface GitFile { path: string; oldPath: string | null; staged: string; unstaged: string; untracked: boolean; conflicted: boolean; inProject: boolean }
+export interface GitRemote { name: string; url: string }
+export interface GitStatus {
+  installed: boolean; isRepo: boolean; root: string | null; projectDir: string; branch: string | null; upstream: string | null; ahead: number; behind: number; detached: boolean
+  files: GitFile[]; remotes: GitRemote[]; operation: string | null; hasIdentity: boolean; userName: string | null; userEmail: string | null; hasGitignore: boolean; stashes: number; problem: string | null
+}
+export interface GitCommit { hash: string; short: string; author: string; email: string; date: string; subject: string; refs: string[]; pushed: boolean }
+export interface GitCommitFile { path: string; oldPath: string | null; status: string; added: number; removed: number }
+export interface GitCommitDetails { commit: GitCommit; body: string; files: GitCommitFile[] }
+export interface GitBranch { name: string; short: string; remote: boolean; current: boolean; upstream: string | null; track: string | null; date: string | null }
+export interface GitStash { ref: string; message: string; date: string | null }
+export interface GitDiff { file: string; text: string; binary: boolean; tooLarge: boolean }

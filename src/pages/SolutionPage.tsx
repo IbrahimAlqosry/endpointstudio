@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { Icon } from '../components/Icon'
+import { GitPanel } from '../components/GitPanel'
 import { JobView } from '../components/JobView'
 import { Button, Empty, Spinner, errorText, useToast } from '../components/ui'
 import { href, navigate } from '../router'
@@ -17,6 +18,7 @@ export const ROLE_INFO: Record<string, { icon: string; color: string; desc: stri
 }
 
 export function SolutionPage({ path, onChanged }: { path: string; onChanged: () => void }) {
+  const [view, setView] = useState<'projects' | 'git'>('projects')
   const toast = useToast()
   const [sln, setSln] = useState<SolutionDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +64,12 @@ export function SolutionPage({ path, onChanged }: { path: string; onChanged: () 
 
       {buildJob && <div className="card pad" style={{ marginBottom: 20 }}><JobView key={buildJob} jobId={buildJob} /></div>}
 
+      <div className="tabs" style={{ marginTop: 0, marginBottom: 18 }}>
+        <button className={`tab${view === 'projects' ? ' active' : ''}`} onClick={() => setView('projects')}><span className="row gap-6"><Icon name="layers" size={15} />Projects <span className="badge" style={{ height: 18 }}>{sln.projects.length}</span></span></button>
+        <button className={`tab${view === 'git' ? ' active' : ''}`} onClick={() => setView('git')}><span className="row gap-6"><Icon name="history" size={15} />Source control</span></button>
+      </div>
+      {view === 'git' && <GitPanel path={sln.path} />}
+      {view === 'projects' && <>
       <div className="stats">
         <div className="card stat"><div className="stat-value">{sln.projects.length}</div><div className="stat-label">Projects</div></div>
         <div className="card stat"><div className="stat-value">{apis.length}</div><div className="stat-label">API projects</div></div>
@@ -88,6 +96,7 @@ export function SolutionPage({ path, onChanged }: { path: string; onChanged: () 
           </div>
         </>
       )}
+      </>}
     </div>
   )
 }
