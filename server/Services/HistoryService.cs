@@ -1,7 +1,7 @@
 using System.Text.Json;
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 /// <summary>
 /// Keeps a copy of every file before the studio changes it, so any change can be undone.

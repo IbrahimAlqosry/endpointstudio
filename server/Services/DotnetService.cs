@@ -5,9 +5,9 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 /// <summary>Knows which .NET tools are installed, builds and runs projects, and sends test requests to them.</summary>
 public class DotnetService : IDisposable

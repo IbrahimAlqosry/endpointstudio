@@ -1,15 +1,31 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 /// <summary>Location for the studio's own data (recent projects, change history).</summary>
 public static class AppStorage
 {
-    public static readonly string Root = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EndpointStudio");
+    public static readonly string Root = ResolveRoot();
+
+    /// <summary>
+    /// %LOCALAPPDATA%\Stackwright. The app used to be called Endpoint Studio; its folder (recent list, history,
+    /// saved publish options) is moved over the first time so nothing is lost.
+    /// </summary>
+    private static string ResolveRoot()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var root = Path.Combine(local, "Stackwright");
+        var old = Path.Combine(local, "EndpointStudio");
+        try
+        {
+            if (!Directory.Exists(root) && Directory.Exists(old)) Directory.Move(old, root);
+        }
+        catch { /* the old folder stays where it is; a fresh one is used */ }
+        return root;
+    }
 
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 

@@ -1,11 +1,12 @@
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Stackwright.Server.Services.Frontend;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 public record DeployRequest(
     string Target,                       // folder | zip | docker | dockerRemote | ssh | webdeploy | azure | ftp
@@ -35,7 +36,8 @@ public record DeployRequest(
     string? Password = null,
     string? ResourceGroup = null,
     string? AppName = null,
-    bool Ftps = false);
+    bool Ftps = false,
+    bool IisRewrite = false);
 
 public record DeployProfile(string Id, string Name, DeployRequest Request, DateTime Saved);
 public record DeployTools(bool Docker, bool DockerRunning, string? DockerVersion, bool Ssh, bool MsDeploy, bool AzureCli, bool VisualStudio);
@@ -115,6 +117,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
     public string Start(string csproj, DeployRequest req)
     {
         var full = Path.GetFullPath(csproj);
+        if (Directory.Exists(full) || full.EndsWith("angular.json", StringComparison.OrdinalIgnoreCase)) full = FrontendService.NormalizePath(full);
         if (!File.Exists(full)) throw new StudioException("The project file could not be found.");
         Validate(req);
         SaveProfile(full, req);
@@ -149,10 +152,11 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
 
     private async Task<string> RunAsync(JobService.Context ctx, string csproj, DeployRequest r)
     {
-        var name = Path.GetFileNameWithoutExtension(csproj);
-        var (platform, major, legacy) = ProjectAnalyzer.Peek(csproj);
+        var isFrontend = csproj.EndsWith("package.json", StringComparison.OrdinalIgnoreCase);
+        var name = isFrontend ? Path.GetFileName(Path.GetDirectoryName(csproj)!) : Path.GetFileNameWithoutExtension(csproj);
+        var (platform, major, legacy) = isFrontend ? (ProjectPlatform.NetCore, 0, false) : ProjectAnalyzer.Peek(csproj);
         var framework = platform == ProjectPlatform.NetFramework || legacy;
-        var temp = Path.Combine(Path.GetTempPath(), "EndpointStudio", "publish", $"{name}-{DateTime.Now:yyyyMMdd-HHmmss}");
+        var temp = Path.Combine(Path.GetTempPath(), "Stackwright", "publish", $"{name}-{DateTime.Now:yyyyMMdd-HHmmss}");
 
         switch (r.Target)
         {
@@ -176,11 +180,12 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
             case "docker":
             case "dockerRemote":
             {
-                if (framework) throw new StudioException(".NET Framework apps need Windows containers, which Endpoint Studio can't build. Publish to a folder or IIS instead.");
+                if (framework) throw new StudioException(".NET Framework apps need Windows containers, which Stackwright can't build. Publish to a folder or IIS instead.");
                 var docker = FindOnPath("docker") ?? throw new StudioException("Docker isn't installed. Install Docker Desktop and try again.");
-                var image = await BuildImageAsync(ctx, docker, csproj, r, major);
-                if (r.Target == "docker") return await DockerLocalOrPushAsync(ctx, docker, image, r);
-                return await DockerRemoteAsync(ctx, docker, image, r);
+                var image = isFrontend ? await BuildFrontendImageAsync(ctx, docker, csproj, r) : await BuildImageAsync(ctx, docker, csproj, r, major);
+                var port = isFrontend ? 80 : 8080;
+                if (r.Target == "docker") return await DockerLocalOrPushAsync(ctx, docker, image, r, port);
+                return await DockerRemoteAsync(ctx, docker, image, r, port);
             }
             case "ssh":
             {
@@ -241,6 +246,25 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
     private async Task PublishAsync(JobService.Context ctx, string csproj, DeployRequest r, string output, bool framework)
     {
         Directory.CreateDirectory(output);
+        if (csproj.EndsWith("package.json", StringComparison.OrdinalIgnoreCase))
+        {
+            // Frontend: build it, then treat its output folder like published files
+            var model = FrontendAnalyzer.Analyze(csproj);
+            var built = await FrontendService.BuildAsync(ctx, model);
+            foreach (var file in Directory.EnumerateFiles(built, "*", SearchOption.AllDirectories))
+            {
+                var target = Path.Combine(output, Path.GetRelativePath(built, file));
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(file, target, true);
+            }
+            var webConfig = Path.Combine(output, "web.config");
+            if (r.IisRewrite && !File.Exists(webConfig))
+            {
+                ctx.Log("Adding web.config so IIS sends page refreshes to the app (needs the IIS URL Rewrite module).");
+                await File.WriteAllTextAsync(webConfig, SpaWebConfig);
+            }
+            return;
+        }
         var dir = Path.GetDirectoryName(csproj)!;
         int exit;
         if (framework)
@@ -343,7 +367,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
             _ => ("mcr.microsoft.com/dotnet/sdk:10.0", "mcr.microsoft.com/dotnet/aspnet:10.0"),
         };
         return $"""
-            # Created by Endpoint Studio. Build from the solution folder:
+            # Created by Stackwright. Build from the solution folder:
             #   docker build -f {rel.Replace(Path.GetFileName(csproj), "Dockerfile")} -t {assembly.ToLowerInvariant()} .
             FROM {sdk} AS build
             WORKDIR /src
@@ -361,7 +385,79 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
             """.Replace("\n", "\r\n");
     }
 
-    private static async Task<string> DockerLocalOrPushAsync(JobService.Context ctx, string docker, string image, DeployRequest r)
+    private const string SpaWebConfig = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <system.webServer>
+            <rewrite>
+              <rules>
+                <rule name="Single page app" stopProcessing="true">
+                  <match url=".*" />
+                  <conditions logicalGrouping="MatchAll">
+                    <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
+                    <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
+                  </conditions>
+                  <action type="Rewrite" url="/" />
+                </rule>
+              </rules>
+            </rewrite>
+          </system.webServer>
+        </configuration>
+        """;
+
+    private async Task<string> BuildFrontendImageAsync(JobService.Context ctx, string docker, string packageJson, DeployRequest r)
+    {
+        var m = FrontendAnalyzer.Analyze(packageJson);
+        var dockerfile = Path.Combine(m.Directory, "Dockerfile");
+        var changes = history.Begin(packageJson, "Added a Dockerfile");
+        if (!File.Exists(dockerfile))
+        {
+            ctx.Log("No Dockerfile yet, creating one (Node to build, nginx to serve). You can undo this from History.");
+            changes.Write(dockerfile, FrontendDockerfile(m));
+            changes.Write(Path.Combine(m.Directory, "nginx.conf"),
+                "server {\r\n  listen 80;\r\n  root /usr/share/nginx/html;\r\n  index index.html;\r\n  location / {\r\n    try_files $uri $uri/ /index.html;\r\n  }\r\n}\r\n");
+        }
+        var ignore = Path.Combine(m.Directory, ".dockerignore");
+        if (!File.Exists(ignore)) changes.Write(ignore, "node_modules\r\ndist\r\nbuild\r\n.angular\r\n.next\r\n.git\r\n");
+        changes.Commit();
+        var image = (string.IsNullOrWhiteSpace(r.ImageName) ? Regex.Replace(m.Name.ToLowerInvariant(), "[^a-z0-9._-]", "-") : r.ImageName!) + ":" + (string.IsNullOrWhiteSpace(r.ImageTag) ? "latest" : r.ImageTag);
+        ctx.Log($"Building the image {image}…");
+        if (await JobService.RunAsync(ctx, docker, ["build", "-t", image, m.Directory], m.Directory) != 0)
+            throw new StudioException("The Docker image couldn't be built. If Docker Desktop isn't running, start it; otherwise the log shows the build error.");
+        return image;
+    }
+
+    private static string FrontendDockerfile(FrontendModel m)
+    {
+        // Older Angular / CRA toolchains don't build on new Node versions
+        var node = m.Framework == "Angular"
+            ? m.FrameworkMajor switch { > 0 and <= 11 => "14", <= 15 => "16", <= 17 => "18", _ => "22" }
+            : m.NeedsLegacyOpenSsl ? "16" : "22";
+        var install = m.PackageManager switch
+        {
+            "yarn" => "RUN corepack enable && yarn install --frozen-lockfile",
+            "pnpm" => "RUN corepack enable && pnpm install --frozen-lockfile",
+            _ => File.Exists(Path.Combine(m.Directory, "package-lock.json")) ? "RUN npm ci" + (m.Framework == "Angular" && m.FrameworkMajor is > 0 and < 13 ? " --legacy-peer-deps" : "") : "RUN npm install",
+        };
+        var output = (m.OutputDir ?? "dist").Replace('\\', '/').TrimEnd('/');
+        return $"""
+            # Created by Stackwright: builds the app with Node, then serves it with nginx
+            FROM node:{node}-alpine AS build
+            WORKDIR /app
+            COPY package*.json yarn.lock* pnpm-lock.yaml* ./
+            {install}
+            COPY . .
+            RUN {(m.PackageManager == "npm" ? "npm run build" : m.PackageManager + " run build")}
+
+            FROM nginx:alpine
+            COPY nginx.conf /etc/nginx/conf.d/default.conf
+            COPY --from=build /app/{output} /usr/share/nginx/html
+            EXPOSE 80
+
+            """.Replace("\n", "\r\n");
+    }
+
+    private static async Task<string> DockerLocalOrPushAsync(JobService.Context ctx, string docker, string image, DeployRequest r, int containerPort = 8080)
     {
         var messages = new List<string> { $"Built the image {image}." };
         if (r.Push)
@@ -383,7 +479,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
         {
             var container = string.IsNullOrWhiteSpace(r.ContainerName) ? image.Split(':')[0].Replace('/', '-') : r.ContainerName!;
             await JobService.RunAsync(ctx, docker, ["rm", "-f", container], Path.GetTempPath());
-            var args = new List<string> { "run", "-d", "--restart", "unless-stopped", "--name", container, "-p", $"{r.HostPort}:8080" };
+            var args = new List<string> { "run", "-d", "--restart", "unless-stopped", "--name", container, "-p", $"{r.HostPort}:{containerPort}" };
             if (!string.IsNullOrWhiteSpace(r.Environment)) args.AddRange(["-e", $"ASPNETCORE_ENVIRONMENT={r.Environment}"]);
             args.Add(image);
             if (await JobService.RunAsync(ctx, docker, args, Path.GetTempPath()) != 0)
@@ -394,10 +490,10 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
         return string.Join(" ", messages);
     }
 
-    private static async Task<string> DockerRemoteAsync(JobService.Context ctx, string docker, string image, DeployRequest r)
+    private static async Task<string> DockerRemoteAsync(JobService.Context ctx, string docker, string image, DeployRequest r, int containerPort = 8080)
     {
         var host = $"ssh://{r.User}@{r.Host}" + (r.Port is > 0 and not 22 ? $":{r.Port}" : "");
-        var tar = Path.Combine(Path.GetTempPath(), "EndpointStudio", $"{image.Replace(':', '-').Replace('/', '-')}.tar");
+        var tar = Path.Combine(Path.GetTempPath(), "Stackwright", $"{image.Replace(':', '-').Replace('/', '-')}.tar");
         Directory.CreateDirectory(Path.GetDirectoryName(tar)!);
         ctx.Log("Saving the image to send it to the server…");
         if (await JobService.RunAsync(ctx, docker, ["save", "-o", tar, image], Path.GetTempPath()) != 0) throw new StudioException("The image couldn't be saved.");
@@ -407,7 +503,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
         File.Delete(tar);
         var container = string.IsNullOrWhiteSpace(r.ContainerName) ? image.Split(':')[0].Replace('/', '-') : r.ContainerName!;
         await JobService.RunAsync(ctx, docker, ["-H", host, "rm", "-f", container], Path.GetTempPath());
-        var args = new List<string> { "-H", host, "run", "-d", "--restart", "unless-stopped", "--name", container, "-p", $"{r.HostPort}:8080" };
+        var args = new List<string> { "-H", host, "run", "-d", "--restart", "unless-stopped", "--name", container, "-p", $"{r.HostPort}:{containerPort}" };
         if (!string.IsNullOrWhiteSpace(r.Environment)) args.AddRange(["-e", $"ASPNETCORE_ENVIRONMENT={r.Environment}"]);
         args.Add(image);
         if (await JobService.RunAsync(ctx, docker, args, Path.GetTempPath()) != 0) throw new StudioException("The container couldn't start on the server. See the log.");

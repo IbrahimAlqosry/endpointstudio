@@ -1,11 +1,11 @@
 using System.Text.RegularExpressions;
-using EndpointStudio.Server.Models;
-using EndpointStudio.Server.Services;
+using Stackwright.Server.Models;
+using Stackwright.Server.Services;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace EndpointStudio.Server.Codegen;
+namespace Stackwright.Server.Codegen;
 
 /// <summary>Adds, edits and removes endpoints in a user's project.</summary>
 public partial class EndpointWriter(HistoryService history)

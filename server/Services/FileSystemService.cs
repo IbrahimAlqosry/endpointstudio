@@ -1,8 +1,9 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
+using Stackwright.Server.Services.Frontend;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 public class FileSystemService
 {
@@ -61,6 +62,10 @@ public class FileSystemService
         }
 
         var projects = dir.EnumerateFiles("*.csproj").Select(f => Describe(f.FullName)).ToList();
+        // Angular / React / Next.js / Vue apps: this folder itself, and the folders directly inside it
+        if (DescribeFrontend(dir.FullName) is { } self) projects.Add(self);
+        foreach (var f in folders.Take(300))
+            if (DescribeFrontend(f.Path) is { } fe) projects.Add(fe);
         var solutions = dir.EnumerateFiles("*.sln").Concat(dir.EnumerateFiles("*.slnx"))
             .Select(f => new SolutionEntry(Path.GetFileNameWithoutExtension(f.Name), f.FullName))
             .ToList();
@@ -92,6 +97,7 @@ public class FileSystemService
             {
                 foreach (var f in d.EnumerateFiles("*.csproj"))
                     result.Add(Describe(f.FullName));
+                if (DescribeFrontend(d.FullName) is { } fe) { result.Add(fe); return; } // don't look inside a frontend app
                 if (depth >= maxDepth) return;
                 foreach (var sub in d.EnumerateDirectories())
                 {
@@ -135,6 +141,23 @@ public class FileSystemService
             .OrderByDescending(p => p.IsWeb)
             .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>An Angular / React / Next.js / Vue app in this folder, if there is one.</summary>
+    public static ProjectFileEntry? DescribeFrontend(string dir)
+    {
+        var kind = FrontendAnalyzer.Detect(dir);
+        if (kind is null) return null;
+        var pkg = Path.Combine(dir, "package.json");
+        string? version = null;
+        try
+        {
+            var core = kind switch { "Angular" => "@angular/core", "Next.js" => "next", "Vue" => "vue", _ => "react" };
+            var raw = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(pkg))?["dependencies"]?[core]?.ToString();
+            version = raw is null ? null : System.Text.RegularExpressions.Regex.Match(raw, @"\d+").Value;
+        }
+        catch { /* version is optional */ }
+        return new ProjectFileEntry(Path.GetFileName(dir), pkg, string.IsNullOrEmpty(version) ? kind : $"{kind} {version}", true, "frontend");
     }
 
     /// <summary>Reads just enough of a project file to show its name, .NET version and whether it is a web project.</summary>

@@ -1,13 +1,13 @@
 using System.Data.Common;
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
-using DbColumn = EndpointStudio.Server.Models.DbColumn;
+using DbColumn = Stackwright.Server.Models.DbColumn;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 /// <summary>Reads database structure (databases/schemas, tables, columns) from SQL Server, PostgreSQL, MySQL, Oracle and SQLite.</summary>
 public class DatabaseService

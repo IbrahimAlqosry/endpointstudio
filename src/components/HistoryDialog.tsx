@@ -8,7 +8,7 @@ export function HistoryDialog({ history, onClose, onUndo }: { history: HistoryEn
   return (
     <Modal
       title="Change history"
-      subtitle="Every change Endpoint Studio makes is saved here. Undo goes back one step at a time."
+      subtitle="Every change Stackwright makes is saved here. Undo goes back one step at a time."
       icon="history"
       onClose={onClose}
       footer={<>

@@ -11,7 +11,8 @@ const SEVERITY: Record<string, { label: string; cls: string; icon: string }> = {
   info: { label: 'Good to know', cls: '', icon: 'info' },
 }
 
-export function HealthDialog({ path, onClose, onOpenEndpoint, onUpgrade }: {
+export function HealthDialog({ path, onClose, onOpenEndpoint, onUpgrade, frontend }: {
+  frontend?: boolean
   path: string
   onClose: () => void
   onOpenEndpoint: (id: string) => void
@@ -21,7 +22,7 @@ export function HealthDialog({ path, onClose, onOpenEndpoint, onUpgrade }: {
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<number | null>(0)
 
-  useEffect(() => { api.health(path).then(setReport).catch(e => setError(errorText(e))) }, [path])
+  useEffect(() => { (frontend ? api.frontendHealth(path) : api.health(path)).then(setReport).catch(e => setError(errorText(e))) }, [path])
 
   const color = !report ? 'var(--text-3)' : report.score >= 90 ? 'var(--success)' : report.score >= 75 ? 'var(--accent)' : report.score >= 55 ? 'var(--warning)' : 'var(--danger)'
 

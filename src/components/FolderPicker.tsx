@@ -153,10 +153,10 @@ function ProjectRow({ p, hint, onPick }: { p: ProjectFileEntry; hint?: string; o
   return (
     <div className="folder-item project" onClick={() => onPick(p.path)} style={p.isWeb ? undefined : { opacity: .7 }} title={p.isWeb ? p.path : `${p.path}
 (class library: usually has no endpoints)`}>
-      <Icon name={p.isWeb ? 'server' : 'box'} size={17} />
+      <Icon name={p.kind === 'frontend' ? 'monitor' : p.isWeb ? 'server' : 'box'} size={17} />
       <span className="strong truncate" style={{ minWidth: 0 }}>{p.name}</span>
       <span className="tiny subtle truncate grow">{hint ?? ''}</span>
-      {p.framework && <span className={`badge${p.framework.startsWith('.NET Framework') ? ' warning' : ' accent'}`}>{p.framework}</span>}
+      {p.framework && <span className={`badge${p.framework.startsWith('.NET Framework') ? ' warning' : p.kind === 'frontend' ? ' success' : ' accent'}`}>{p.framework}</span>}
       {!p.isWeb && <span className="badge">Library</span>}
       <Icon name="arrowRight" size={15} />
     </div>

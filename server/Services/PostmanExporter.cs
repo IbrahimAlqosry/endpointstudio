@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 /// <summary>Turns a project's endpoints into a Postman collection (v2.1).</summary>
 public static class PostmanExporter
@@ -15,7 +15,7 @@ public static class PostmanExporter
             ["info"] = new JsonObject
             {
                 ["name"] = model.Name,
-                ["description"] = $"Exported from Endpoint Studio ({model.Endpoints.Count} endpoints).",
+                ["description"] = $"Exported from Stackwright ({model.Endpoints.Count} endpoints).",
                 ["schema"] = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
             },
             ["variable"] = new JsonArray(new JsonObject { ["key"] = "baseUrl", ["value"] = baseUrl ?? "http://localhost:5000" }),

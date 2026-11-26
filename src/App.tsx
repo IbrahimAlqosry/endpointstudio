@@ -8,6 +8,7 @@ import { NewProjectPage } from './pages/NewProjectPage'
 import { ProjectPage } from './pages/ProjectPage'
 import { SolutionPage } from './pages/SolutionPage'
 import { RecoverPage } from './pages/RecoverPage'
+import { FrontendPage } from './pages/FrontendPage'
 import { href, openPath, routeFor, useRoute } from './router'
 import type { RecentProject } from './types'
 
@@ -40,8 +41,8 @@ function Shell() {
         <a className="brand" href={href({ page: 'home' })}>
           <div className="brand-logo"><Icon name="logo" size={19} stroke={2.2} /></div>
           <div>
-            <div className="brand-name" style={{ color: 'var(--text)' }}>Endpoint Studio</div>
-            <div className="brand-sub">Build APIs without code</div>
+            <div className="brand-name" style={{ color: 'var(--text)' }}>Stackwright</div>
+            <div className="brand-sub">.NET, Angular & React, no code</div>
           </div>
         </a>
 
@@ -58,11 +59,11 @@ function Shell() {
             {recent.slice(0, 8).map(p => (
               <a
                 key={p.path}
-                className={`nav-item${(route.page === 'project' || route.page === 'solution') && route.path.toLowerCase() === p.path.toLowerCase() ? ' active' : ''}`}
+                className={`nav-item${(route.page === 'project' || route.page === 'solution' || route.page === 'frontend') && route.path.toLowerCase() === p.path.toLowerCase() ? ' active' : ''}`}
                 href={href(routeFor(p.path))}
                 title={p.path}
               >
-                <Icon name={/\.slnx?$/i.test(p.path) ? 'layers' : 'box'} size={16} />
+                <Icon name={/\.slnx?$/i.test(p.path) ? 'layers' : /package\.json$/i.test(p.path) ? 'monitor' : 'box'} size={16} />
                 <span className="truncate">{p.name}</span>
                 <span className="count">{p.endpointCount}</span>
               </a>
@@ -87,13 +88,14 @@ function Shell() {
         <div className="topbar-mobile">
           <button className="btn icon sm ghost" onClick={() => setMenuOpen(o => !o)} aria-label="Menu"><Icon name="menu" /></button>
           <div className="brand-logo" style={{ width: 28, height: 28 }}><Icon name="logo" size={16} stroke={2.2} /></div>
-          <span className="strong">Endpoint Studio</span>
+          <span className="strong">Stackwright</span>
         </div>
         {route.page === 'home' && <HomePage recent={recent} onOpen={() => setPicker(true)} onForget={async p => { await api.forget(p); refreshRecent() }} />}
         {route.page === 'project' && <ProjectPage key={route.path} path={route.path} onChanged={refreshRecent} />}
         {route.page === 'solution' && <SolutionPage key={route.path} path={route.path} onChanged={refreshRecent} />}
         {route.page === 'new' && <NewProjectPage />}
         {route.page === 'recover' && <RecoverPage />}
+        {route.page === 'frontend' && <FrontendPage key={route.path} path={route.path} onChanged={refreshRecent} />}
       </main>
 
       {picker && <FolderPicker mode="project" onPick={openProject} onClose={() => setPicker(false)} />}

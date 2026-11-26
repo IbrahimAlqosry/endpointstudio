@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { DeployProfile, DeployRequest, DeployTarget, DeployTools, ProjectDetails } from '../types'
+import type { DeployProfile, DeployRequest, DeployTarget, DeployTools } from '../types'
 import { FolderPicker } from './FolderPicker'
 import { Icon } from './Icon'
 import { JobView } from './JobView'
@@ -22,7 +22,9 @@ const RUNTIMES = [
   { value: 'linux-arm64', label: 'Linux ARM (e.g. Raspberry Pi, Graviton)' }, { value: 'osx-arm64', label: 'macOS (Apple silicon)' },
 ]
 
-export function DeployPanel({ project }: { project: ProjectDetails }) {
+export type DeployProject = { path: string; name: string; platform: string; frontend?: boolean }
+
+export function DeployPanel({ project }: { project: DeployProject }) {
   const toast = useToast()
   const [tools, setTools] = useState<DeployTools | null>(null)
   const [profiles, setProfiles] = useState<DeployProfile[]>([])
@@ -30,7 +32,7 @@ export function DeployPanel({ project }: { project: ProjectDetails }) {
   const [jobId, setJobId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [picker, setPicker] = useState(false)
-  const framework = project.capabilities.platform === 'NetFramework'
+  const framework = project.platform === 'NetFramework'
 
   useEffect(() => {
     api.deployTools().then(setTools).catch(() => {})
@@ -77,7 +79,7 @@ export function DeployPanel({ project }: { project: ProjectDetails }) {
       <section>
         <div className="section-title"><Icon name="rocket" size={17} /> Where should it go?</div>
         <div className="choices" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))' }}>
-          {TARGETS.map(t => {
+          {TARGETS.filter(t => !project.frontend || t.id !== 'azure').map(t => {
             const unavailable = t.needs && tools && !tools[t.needs]
             return <Choice key={t.id} icon={t.icon} title={t.title} desc={t.desc + (unavailable ? ' (needs a tool that isn\'t installed)' : '')} selected={req.target === t.id} onClick={() => set({ target: t.id })} />
           })}
@@ -176,7 +178,10 @@ export function DeployPanel({ project }: { project: ProjectDetails }) {
           </>
         )}
 
-        <details className="disclose">
+        {project.frontend && ['folder', 'webdeploy', 'ftp'].includes(req.target) && (
+          <Switch checked={!!req.iisRewrite} onChange={v => set({ iisRewrite: v })} label="It's an IIS site: add a rule so refreshing a page doesn't show 404 (needs IIS URL Rewrite)" />
+        )}
+        {!project.frontend && <details className="disclose">
           <summary><Icon name="chevronRight" size={13} /> Build options</summary>
           <div className="grid-3">
             <Field label="Configuration">
@@ -203,7 +208,7 @@ export function DeployPanel({ project }: { project: ProjectDetails }) {
               <Switch checked={!!req.singleFile} onChange={v => set({ singleFile: v })} label="Single file" />
             </div>
           )}
-        </details>
+        </details>}
 
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <Button variant="primary" size="lg" icon="rocket" loading={busy} disabled={!!missingTool || !!blockedByFramework} onClick={() => start(req)}>Publish</Button>

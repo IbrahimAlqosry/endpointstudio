@@ -1,12 +1,12 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 public class SourceFile
 {

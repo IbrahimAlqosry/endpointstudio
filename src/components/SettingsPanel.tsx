@@ -7,7 +7,7 @@ import { Alert, Button, Empty, Field, Modal, Spinner, Switch, errorText, useToas
 type Draft = Record<string, { value: string | null; kind: string; remove?: boolean; added?: boolean }>
 
 /** View and edit appsettings*.json / Web.config as a friendly list, with environments and secret masking. */
-export function SettingsPanel({ path, onChanged }: { path: string; onChanged: () => void }) {
+export function SettingsPanel({ path, onChanged, frontend }: { path: string; onChanged: () => void; frontend?: boolean }) {
   const toast = useToast()
   const [info, setInfo] = useState<SettingsInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -19,7 +19,7 @@ export function SettingsPanel({ path, onChanged }: { path: string; onChanged: ()
   const [adding, setAdding] = useState(false)
   const [envOpen, setEnvOpen] = useState(false)
 
-  const load = () => api.settings(path).then(s => { setInfo(s); setFileName(f => f || s.files[0]?.name || '') }).catch(e => setError(errorText(e)))
+  const load = () => (frontend ? api.frontendSettings(path) : api.settings(path)).then(s => { setInfo(s); setFileName(f => f || s.files[0]?.name || '') }).catch(e => setError(errorText(e)))
   useEffect(() => { load() }, [path]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const file = info?.files.find(f => f.name === fileName)
@@ -48,7 +48,7 @@ export function SettingsPanel({ path, onChanged }: { path: string; onChanged: ()
     setSaving(true)
     try {
       const list: SettingChange[] = Object.entries(draft).map(([key, d]) => ({ key, value: d.value, kind: d.kind, remove: !!d.remove }))
-      const r = await api.saveSettings(path, file.name, list)
+      const r = await (frontend ? api.frontendSaveSettings(path, file.name, list) : api.saveSettings(path, file.name, list))
       setInfo(r.settings); setDraft({}); onChanged()
       toast.success(r.message)
     } catch (e) { toast.error(errorText(e)) } finally { setSaving(false) }
@@ -56,7 +56,7 @@ export function SettingsPanel({ path, onChanged }: { path: string; onChanged: ()
 
   if (error) return <Alert kind="error">{error}</Alert>
   if (!info) return <div className="empty"><Spinner large /></div>
-  if (info.files.length === 0) return <div className="card"><Empty icon="fileText" title="No settings files">This project has no appsettings.json or Web.config.</Empty></div>
+  if (info.files.length === 0) return <div className="card"><Empty icon="fileText" title="No settings files" action={frontend ? <Button icon="plus" onClick={() => setEnvOpen(true)}>Add an environment file</Button> : undefined}>{frontend ? 'This app has no environment settings files yet.' : 'This project has no appsettings.json or Web.config.'}</Empty>{envOpen && <AddEnvironmentDialog onClose={() => setEnvOpen(false)} onAdd={async name => { try { const r = await api.frontendAddEnvironment(path, name); setInfo(r.settings); setFileName(r.settings.files[0]?.name ?? ''); setEnvOpen(false); onChanged() } catch (e) { toast.error(errorText(e)) } }} />}</div>
 
   return (
     <div className="col gap-16">
@@ -64,17 +64,18 @@ export function SettingsPanel({ path, onChanged }: { path: string; onChanged: ()
         <div className="segmented">
           {info.files.map(f => (
             <button key={f.name} className={f.name === fileName ? 'active' : ''} onClick={() => switchFile(f.name)}>
-              {f.environment ? <><span className="subtle">Environment</span> {f.environment}</> : f.format === 'xml' ? 'Web.config' : 'Main settings'}
+              {f.environment ? <><span className="subtle">Environment</span> {f.environment}</> : f.format === 'xml' ? 'Web.config' : f.format === 'env' ? f.name : 'Main settings'}
             </button>
           ))}
         </div>
         <div className="row gap-6">
-          {file?.format === 'json' && <Button size="sm" icon="plus" onClick={() => setEnvOpen(true)}>Add environment</Button>}
+          {file?.format !== 'xml' && <Button size="sm" icon="plus" onClick={() => setEnvOpen(true)}>Add environment</Button>}
           <Button size="sm" icon="plus" onClick={() => setAdding(true)}>Add setting</Button>
         </div>
       </div>
 
       {file?.environment && <Alert kind="info">Values here replace the main settings when the app runs in the <strong>{file.environment}</strong> environment.</Alert>}
+      {frontend && <Alert kind="warning">Frontend settings are sent to every visitor's browser. Never put passwords or secret keys here.</Alert>}
       {file?.hasComments && <Alert kind="warning">This file contains comments. Saving changes rewrites the file without them.</Alert>}
 
       <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search settings…" value={filter} onChange={e => setFilter(e.target.value)} /></div>
@@ -145,7 +146,7 @@ export function SettingsPanel({ path, onChanged }: { path: string; onChanged: ()
 
       {adding && file && <AddSettingDialog web={file.format === 'xml'} onClose={() => setAdding(false)} onAdd={(key, value, kind) => { setDraft(x => ({ ...x, [key]: { value, kind, added: true } })); setAdding(false) }} />}
       {envOpen && <AddEnvironmentDialog onClose={() => setEnvOpen(false)} onAdd={async name => {
-        try { const r = await api.addEnvironment(path, name); setInfo(r.settings); setFileName(`appsettings.${name}.json`); setDraft({}); setEnvOpen(false); onChanged(); toast.success(r.message) }
+        try { const r = await (frontend ? api.frontendAddEnvironment(path, name) : api.addEnvironment(path, name)); setInfo(r.settings); setFileName(r.settings.files.find(f => f.environment?.toLowerCase() === name.toLowerCase())?.name ?? fileName); setDraft({}); setEnvOpen(false); onChanged(); toast.success(r.message) }
         catch (e) { toast.error(errorText(e)) }
       }} />}
     </div>

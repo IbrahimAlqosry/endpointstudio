@@ -1,8 +1,8 @@
-using EndpointStudio.Server.Models;
+using Stackwright.Server.Models;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 public record JobStatus(string Id, string Kind, string Title, string State, List<string> Log, string? Result, string? ResultUrl, DateTime Started, DateTime? Finished);
 

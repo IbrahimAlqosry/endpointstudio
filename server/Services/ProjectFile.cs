@@ -1,6 +1,6 @@
 using System.Xml.Linq;
 
-namespace EndpointStudio.Server.Services;
+namespace Stackwright.Server.Services;
 
 /// <summary>
 /// Reads MSBuild properties the way most real solutions define them: in the project file itself, or in a

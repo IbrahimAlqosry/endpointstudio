@@ -190,7 +190,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
       </div>
 
       {view === 'settings' && <SettingsPanel path={path} onChanged={load} />}
-      {view === 'deploy' && <DeployPanel project={project} />}
+      {view === 'deploy' && <DeployPanel project={{ path: project.path, name: project.name, platform: project.capabilities.platform }} />}
       {view === 'endpoints' && <>
       <RunBar run={run} busy={busy} onToggle={toggleRun} onExport={exportPostman} canRun={project.capabilities.canRun} runNote={project.capabilities.runNote} framework={project.capabilities.platform === 'NetFramework'} />
 
@@ -227,7 +227,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
       {project.endpoints.length === 0 ? (
         <div className="card">
           <Empty icon="layers" title="No endpoints yet" action={<Button variant="primary" icon="plus" onClick={() => setEditor({ mode: 'add' })}>Add your first endpoint</Button>}>
-            This project doesn’t have any endpoints. Add one and Endpoint Studio will write it into the project for you.
+            This project doesn’t have any endpoints. Add one and Stackwright will write it into the project for you.
           </Empty>
         </div>
       ) : groups.length === 0 ? (

@@ -10,10 +10,10 @@ export function HomePage({ recent, onOpen, onForget }: { recent: RecentProject[]
         <div className="row gap-6" style={{ marginBottom: 10 }}>
           <span className="badge accent"><Icon name="sparkles" size={13} /> No code needed</span>
         </div>
-        <h1>Design your .NET APIs visually</h1>
-        <p>Open any .NET API project to browse, add, edit and remove endpoints, or turn a database into a ready-to-run API in a few clicks.</p>
+        <h1>Build your whole stack visually</h1>
+        <p>Open .NET APIs and Angular, React, Next.js or Vue apps to explore, change, check, run and publish them, connect frontends to their APIs, or turn a database into a ready-to-run API in a few clicks.</p>
         <div className="row wrap gap-6 mt-16">
-          {['.NET Framework 4.x', '.NET Core 2.x–3.1', '.NET 5', '.NET 6', '.NET 7', '.NET 8', '.NET 9', '.NET 10', '.NET 11'].map(v => <span key={v} className="badge">{v}</span>)}
+          {['.NET Framework 4.x', '.NET Core', '.NET 5 – 11', 'Angular', 'React', 'Next.js', 'Vue', 'SQL Server', 'PostgreSQL', 'MySQL', 'Oracle', 'SQLite'].map(v => <span key={v} className="badge">{v}</span>)}
         </div>
         <div className="row wrap mt-24">
           <Button variant="primary" size="lg" icon="folderOpen" onClick={onOpen}>Open a project</Button>
@@ -56,7 +56,7 @@ export function HomePage({ recent, onOpen, onForget }: { recent: RecentProject[]
                 onClick={e => { e.stopPropagation(); onForget(p.path) }}
               ><Icon name="x" size={15} /></button>
               <div className="row">
-                <div className="group-icon"><Icon name={/\.slnx?$/i.test(p.path) ? 'layers' : 'box'} size={17} /></div>
+                <div className="group-icon"><Icon name={/\.slnx?$/i.test(p.path) ? 'layers' : /package\.json$/i.test(p.path) ? 'monitor' : 'box'} size={17} /></div>
                 <div className="grow">
                   <div className="strong truncate">{p.name}</div>
                   <div className="tiny subtle">Opened {timeAgo(p.lastOpened)}</div>

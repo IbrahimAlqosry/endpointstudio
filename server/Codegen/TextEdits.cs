@@ -2,10 +2,10 @@ using System.Text;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
-using EndpointStudio.Server.Models;
-using EndpointStudio.Server.Services;
+using Stackwright.Server.Models;
+using Stackwright.Server.Services;
 
-namespace EndpointStudio.Server.Codegen;
+namespace Stackwright.Server.Codegen;
 
 /// <summary>Small helpers for making precise, formatting-preserving edits to C# source text.</summary>
 public sealed class TextEdits(string text)

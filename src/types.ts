@@ -3,7 +3,7 @@ export type ParamSource = 'Route' | 'Query' | 'Body' | 'Header' | 'Service'
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface FolderEntry { name: string; path: string }
-export interface ProjectFileEntry { name: string; path: string; framework: string | null; isWeb: boolean }
+export interface ProjectFileEntry { name: string; path: string; framework: string | null; isWeb: boolean; kind?: 'dotnet' | 'frontend' }
 export interface SolutionEntry { name: string; path: string }
 export interface FileEntry { name: string; path: string; size: number }
 export interface BrowseResult { path: string | null; parent: string | null; folders: FolderEntry[]; projects: ProjectFileEntry[]; solutions: SolutionEntry[]; files?: FileEntry[] | null }
@@ -62,7 +62,7 @@ export interface UpgradePlan { from: string; to: string; targetMajor: number; st
 export interface UpgradeRequest { targetMajor: number; includeReferences: boolean }
 
 export interface SettingEntry { key: string; value: string | null; kind: 'string' | 'number' | 'bool' | 'null' | 'section' | 'array' | 'error'; secret: boolean }
-export interface SettingsFile { name: string; path: string; format: 'json' | 'xml'; environment: string | null; hasComments: boolean; entries: SettingEntry[] }
+export interface SettingsFile { name: string; path: string; format: 'json' | 'xml' | 'ts' | 'env'; environment: string | null; hasComments: boolean; entries: SettingEntry[] }
 export interface LaunchProfile { name: string; urls: string | null; environment: string | null }
 export interface SettingsInfo { files: SettingsFile[]; environments: string[]; launchProfiles: LaunchProfile[] }
 export interface SettingChange { key: string; value: string | null; kind: string; remove: boolean }
@@ -73,7 +73,7 @@ export interface DeployRequest {
   environment?: string | null; outputPath?: string | null; imageName?: string | null; imageTag?: string | null; runLocally?: boolean; hostPort?: number | null
   containerName?: string | null; push?: boolean; registry?: string | null; registryUser?: string | null; registryPassword?: string | null
   host?: string | null; port?: number | null; user?: string | null; keyFile?: string | null; remotePath?: string | null; restartCommand?: string | null
-  siteName?: string | null; password?: string | null; resourceGroup?: string | null; appName?: string | null; ftps?: boolean
+  siteName?: string | null; password?: string | null; resourceGroup?: string | null; appName?: string | null; ftps?: boolean; iisRewrite?: boolean
 }
 export interface DeployProfile { id: string; name: string; request: DeployRequest; saved: string }
 export interface DeployTools { docker: boolean; dockerRunning: boolean; dockerVersion: string | null; ssh: boolean; msDeploy: boolean; azureCli: boolean; visualStudio: boolean }
@@ -81,6 +81,17 @@ export interface JobStatus { id: string; kind: string; title: string; state: 'ru
 
 export interface AssemblyEntry { name: string; path: string; version: string | null; framework: string | null; isOwnCode: boolean; isMainApp: boolean; controllers: number; types: number; size: number; obfuscated: boolean }
 export interface InspectResult { folder: string; assemblies: AssemblyEntry[]; mainApp: string | null }
+
+export interface FrontendRoute { path: string; component: string | null; kind: string; guards: string[]; file: string; line: number }
+export interface FrontendComponent { name: string; kind: string; selector: string | null; file: string; line: number }
+export interface FrontendApiCall { id: string; method: string; url: string; path: string; base: string | null; caller: string | null; file: string; line: number; match: 'matched' | 'missing' | 'method' | 'unknown' | 'asset'; endpointId: string | null; endpointRoute: string | null; endpointMethod: string | null }
+export interface EndpointBrief { id: string; method: string; route: string; name: string }
+export interface FrontendDetails {
+  kind: 'frontend'; name: string; path: string; directory: string; framework: string; frameworkVersion: string | null; frameworkMajor: number
+  buildTool: string | null; packageManager: string; installed: boolean; typeScript: boolean; scripts: Record<string, string>; outputDir: string | null; devScript: string | null
+  routes: FrontendRoute[]; components: FrontendComponent[]; apiCalls: FrontendApiCall[]; warnings: string[]; sourceFiles: number
+  linkedBackend: string | null; linkedBackendName: string | null; unusedEndpoints: EndpointBrief[]; suggestedBackends: ProjectFileEntry[]; supportNote: string | null; history: HistoryEntry[]
+}
 
 export interface HistoryEntry { id: string; time: string; description: string }
 

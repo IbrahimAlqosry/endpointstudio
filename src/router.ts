@@ -6,6 +6,7 @@ export type Route =
   | { page: 'solution'; path: string }
   | { page: 'new' }
   | { page: 'recover' }
+  | { page: 'frontend'; path: string }
 
 function parse(hash: string): Route {
   const h = hash.replace(/^#/, '')
@@ -15,6 +16,7 @@ function parse(hash: string): Route {
   if (p === '/solution' && params.get('path')) return { page: 'solution', path: params.get('path')! }
   if (p === '/new') return { page: 'new' }
   if (p === '/recover') return { page: 'recover' }
+  if (p === '/frontend' && params.get('path')) return { page: 'frontend', path: params.get('path')! }
   return { page: 'home' }
 }
 
@@ -24,6 +26,7 @@ export function href(route: Route): string {
     case 'solution': return `#/solution?path=${encodeURIComponent(route.path)}`
     case 'new': return '#/new'
     case 'recover': return '#/recover'
+    case 'frontend': return `#/frontend?path=${encodeURIComponent(route.path)}`
     default: return '#/'
   }
 }
@@ -34,11 +37,14 @@ export function navigate(route: Route) {
 
 /** Opens a project file or a solution file on the right page. */
 export function openPath(path: string) {
-  navigate(/\.slnx?$/i.test(path) ? { page: 'solution', path } : { page: 'project', path })
+  navigate(routeFor(path))
 }
 
+/** Solutions, .NET projects and Angular/React apps each open on their own page. */
 export function routeFor(path: string): Route {
-  return /\.slnx?$/i.test(path) ? { page: 'solution', path } : { page: 'project', path }
+  if (/\.slnx?$/i.test(path)) return { page: 'solution', path }
+  if (/(package|angular)\.json$/i.test(path)) return { page: 'frontend', path }
+  return { page: 'project', path }
 }
 
 export function useRoute(): Route {

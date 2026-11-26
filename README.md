@@ -1,4 +1,4 @@
-# Endpoint Studio
+# Stackwright
 
 A visual, no-code studio for **.NET Web APIs**, from **.NET Framework 4.x (ASP.NET Web API 2)** through **.NET Core** to **.NET 11**. Open any .NET project to browse, add, edit and delete its endpoints, or turn a SQL Server or MySQL database into a ready-to-run API in a few clicks. Users only ever see forms, lists and buttons. They never see code.
 

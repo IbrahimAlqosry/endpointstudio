@@ -1,9 +1,9 @@
-namespace EndpointStudio.Server.Models;
+namespace Stackwright.Server.Models;
 
 // ---------- File system ----------
 public record DriveEntry(string Name, string Path, string? Label);
 public record FolderEntry(string Name, string Path);
-public record ProjectFileEntry(string Name, string Path, string? Framework, bool IsWeb);
+public record ProjectFileEntry(string Name, string Path, string? Framework, bool IsWeb, string Kind = "dotnet");
 public record SolutionEntry(string Name, string Path);
 public record FileEntry(string Name, string Path, long Size);
 public record BrowseResult(string? Path, string? Parent, List<FolderEntry> Folders, List<ProjectFileEntry> Projects, List<SolutionEntry> Solutions, List<FileEntry>? Files = null);

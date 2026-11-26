@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Serialization;
-using EndpointStudio.Server.Codegen;
-using EndpointStudio.Server.Models;
-using EndpointStudio.Server.Services;
+using Stackwright.Server.Codegen;
+using Stackwright.Server.Models;
+using Stackwright.Server.Services;
+using Stackwright.Server.Services.Frontend;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(builder.Configuration["urls"] ?? "http://localhost:5199");
@@ -25,6 +26,7 @@ builder.Services.AddSingleton<JobService>();
 builder.Services.AddSingleton<SettingsService>();
 builder.Services.AddSingleton<DeployService>();
 builder.Services.AddSingleton<DecompileService>();
+builder.Services.AddSingleton<Stackwright.Server.Services.Frontend.FrontendService>();
 
 var app = builder.Build();
 
@@ -195,6 +197,29 @@ api.MapPost("/jobs/{id}/cancel", (string id, JobService jobs) => { jobs.Cancel(i
 api.MapPost("/decompile/inspect", (PathBody body, DecompileService d) => d.Inspect(body.Path));
 api.MapPost("/decompile/recover", (RecoverRequest req, DecompileService d) => new { jobId = d.Recover(req) });
 
+// ---------------------------------------------------------------- Angular / React / Next.js / Vue projects
+api.MapGet("/frontend", (string path, FrontendService fe, RecentProjectsStore recent) =>
+{
+    var d = fe.Details(path);
+    recent.Touch(d.Path, d.Name, d.ApiCalls.Count);
+    return d;
+});
+api.MapPost("/frontend/link", (string path, LinkBody body, FrontendService fe) => { fe.Link(FrontendService.NormalizePath(path), body.Backend); return fe.Details(path); });
+api.MapGet("/frontend/settings", (string path, FrontendService fe) => fe.Settings(path));
+api.MapPut("/frontend/settings", (string path, SaveSettingsRequest req, FrontendService fe) => new { message = fe.SaveSettings(path, req), settings = fe.Settings(path) });
+api.MapPost("/frontend/settings/environment", (string path, NameBody body, FrontendService fe) => new { message = fe.AddEnvironment(path, body.Name), settings = fe.Settings(path) });
+api.MapPost("/frontend/install", (string path, FrontendService fe) => new { jobId = fe.Install(path) });
+api.MapPost("/frontend/build", (string path, FrontendService fe) => new { jobId = fe.Build(path) });
+api.MapGet("/frontend/run", (string path, FrontendService fe) => fe.DevStatus(path));
+api.MapPost("/frontend/run", (string path, FrontendService fe) => fe.StartDev(path));
+api.MapPost("/frontend/stop", (string path, FrontendService fe) => fe.StopDev(path));
+api.MapPost("/frontend/undo", (string path, FrontendService fe, HistoryService history) =>
+{
+    var what = history.UndoLast(FrontendService.NormalizePath(path));
+    return new { message = $"Undone: {what}", project = fe.Details(path) };
+});
+api.MapGet("/frontend/health", (string path, FrontendService fe) => fe.Health(path));
+
 // ---------------------------------------------------------------- Database
 api.MapPost("/db/connect", async (DbConnectionInfo info, DatabaseService db, CancellationToken ct) =>
 {
@@ -215,9 +240,13 @@ api.MapPost("/db/generate", async (GenerateProjectRequest req, ProjectGenerator 
 // SPA fallback for client-side routes
 app.MapFallbackToFile("index.html");
 
-app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<DotnetService>().Dispose());
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    app.Services.GetRequiredService<DotnetService>().Dispose();
+    app.Services.GetRequiredService<FrontendService>().StopAll();
+});
 
-app.Logger.LogInformation("Endpoint Studio server ready.");
+app.Logger.LogInformation("Stackwright server ready.");
 app.Run();
 
 static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService history, DotnetService dotnet) => new(
@@ -243,3 +272,4 @@ static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService histo
 record PathBody(string Path, int? Line = null);
 record SqlTextBody(string? Sql);
 record NameBody(string Name);
+record LinkBody(string? Backend);

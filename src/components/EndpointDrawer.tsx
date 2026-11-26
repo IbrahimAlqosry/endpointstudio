@@ -181,7 +181,7 @@ function TryPanel({ project, endpoint, run, onStart }: { project: ProjectDetails
   if (!running) {
     return (
       <div className="col gap-16">
-        <Alert kind="info">To try endpoints, the API needs to be running. Endpoint Studio will start it for you.</Alert>
+        <Alert kind="info">To try endpoints, the API needs to be running. Stackwright will start it for you.</Alert>
         {project.capabilities.canRun
           ? <Button variant="success" icon="play" loading={run?.state === 'starting'} onClick={onStart}>{run?.state === 'starting' ? 'Starting…' : 'Run the API'}</Button>
           : <Alert kind="warning">{project.capabilities.runNote}</Alert>}

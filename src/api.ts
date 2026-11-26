@@ -1,6 +1,6 @@
 import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
-  DeployProfile, DeployRequest, InspectResult, DeployTools, GenerateProjectResult, HealthReport, JobStatus, SettingChange, SettingsInfo, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
+  DeployProfile, DeployRequest, FrontendDetails, InspectResult, RunStatus as FeRunStatus, DeployTools, GenerateProjectResult, HealthReport, JobStatus, SettingChange, SettingsInfo, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
 } from './types'
 
 export class ApiError extends Error {}
@@ -14,7 +14,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
-    throw new ApiError('Endpoint Studio’s helper service isn’t running. Start it with “npm run dev” and try again.')
+    throw new ApiError('Stackwright’s helper service isn’t running. Start it with “npm run dev” and try again.')
   }
   const text = await res.text()
   let data: unknown = null
@@ -22,7 +22,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   if (!res.ok) {
     const msg = (data as { error?: string } | null)?.error
     throw new ApiError(msg ?? (res.status === 502 || res.status === 504
-      ? 'Endpoint Studio’s helper service isn’t running. Start it with “npm run dev” and try again.'
+      ? 'Stackwright’s helper service isn’t running. Start it with “npm run dev” and try again.'
       : `Request failed (${res.status}).`))
   }
   return data as T
@@ -63,6 +63,18 @@ export const api = {
   cancelJob: (id: string) => request<void>('POST', `/api/jobs/${id}/cancel`),
   inspectPublished: (path: string) => request<InspectResult>('POST', '/api/decompile/inspect', { path }),
   recover: (req: { folder: string; assemblies: string[]; outputFolder: string; solutionName: string | null }) => request<{ jobId: string }>('POST', '/api/decompile/recover', req),
+  frontend: (path: string) => request<FrontendDetails>('GET', `/api/frontend?${q(path)}`),
+  frontendLink: (path: string, backend: string | null) => request<FrontendDetails>('POST', `/api/frontend/link?${q(path)}`, { backend }),
+  frontendSettings: (path: string) => request<SettingsInfo>('GET', `/api/frontend/settings?${q(path)}`),
+  frontendSaveSettings: (path: string, file: string, changes: SettingChange[]) => request<{ message: string; settings: SettingsInfo }>('PUT', `/api/frontend/settings?${q(path)}`, { file, changes }),
+  frontendAddEnvironment: (path: string, name: string) => request<{ message: string; settings: SettingsInfo }>('POST', `/api/frontend/settings/environment?${q(path)}`, { name }),
+  frontendInstall: (path: string) => request<{ jobId: string }>('POST', `/api/frontend/install?${q(path)}`),
+  frontendBuild: (path: string) => request<{ jobId: string }>('POST', `/api/frontend/build?${q(path)}`),
+  frontendRunStatus: (path: string) => request<FeRunStatus>('GET', `/api/frontend/run?${q(path)}`),
+  frontendRun: (path: string) => request<FeRunStatus>('POST', `/api/frontend/run?${q(path)}`),
+  frontendStop: (path: string) => request<FeRunStatus>('POST', `/api/frontend/stop?${q(path)}`),
+  frontendHealth: (path: string) => request<HealthReport>('GET', `/api/frontend/health?${q(path)}`),
+  frontendUndo: (path: string) => request<{ message: string; project: FrontendDetails }>('POST', `/api/frontend/undo?${q(path)}`),
   health: (path: string) => request<HealthReport>('GET', `/api/project/health?${q(path)}`),
   upgradePlan: (path: string, req: UpgradeRequest) => request<UpgradePlan>('POST', `/api/project/upgrade/plan?${q(path)}`, req),
   upgrade: (path: string, req: UpgradeRequest) => request<ChangeResult>('POST', `/api/project/upgrade?${q(path)}`, req),
