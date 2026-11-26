@@ -1,6 +1,6 @@
 import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
-  GenerateProjectResult, HealthReport, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
+  DeployProfile, DeployRequest, InspectResult, DeployTools, GenerateProjectResult, HealthReport, JobStatus, SettingChange, SettingsInfo, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
 } from './types'
 
 export class ApiError extends Error {}
@@ -51,6 +51,18 @@ export const api = {
   build: (path: string) => request<BuildResult>('POST', `/api/project/build?${q(path)}`),
   sqlTest: (path: string, req: SqlTestRequest) => request<SqlTestResult>('POST', `/api/project/sql/test?${q(path)}`, req),
   sqlParameters: (sql: string) => request<string[]>('POST', '/api/sql/parameters', { sql }),
+  settings: (path: string) => request<SettingsInfo>('GET', `/api/project/settings?${q(path)}`),
+  saveSettings: (path: string, file: string, changes: SettingChange[]) => request<{ message: string; settings: SettingsInfo }>('PUT', `/api/project/settings?${q(path)}`, { file, changes }),
+  addEnvironment: (path: string, name: string) => request<{ message: string; settings: SettingsInfo }>('POST', `/api/project/settings/environment?${q(path)}`, { name }),
+  deployTools: () => request<DeployTools>('GET', '/api/deploy/tools'),
+  deployProfiles: (path: string) => request<DeployProfile[]>('GET', `/api/project/deploy/profiles?${q(path)}`),
+  deploy: (path: string, req: DeployRequest) => request<{ jobId: string }>('POST', `/api/project/deploy?${q(path)}`, req),
+  buildSolution: (path: string) => request<{ jobId: string }>('POST', `/api/solution/build?${q(path)}`),
+  job: (id: string) => request<JobStatus>('GET', `/api/jobs/${id}`),
+  jobs: (owner: string) => request<JobStatus[]>('GET', `/api/jobs?owner=${encodeURIComponent(owner)}`),
+  cancelJob: (id: string) => request<void>('POST', `/api/jobs/${id}/cancel`),
+  inspectPublished: (path: string) => request<InspectResult>('POST', '/api/decompile/inspect', { path }),
+  recover: (req: { folder: string; assemblies: string[]; outputFolder: string; solutionName: string | null }) => request<{ jobId: string }>('POST', '/api/decompile/recover', req),
   health: (path: string) => request<HealthReport>('GET', `/api/project/health?${q(path)}`),
   upgradePlan: (path: string, req: UpgradeRequest) => request<UpgradePlan>('POST', `/api/project/upgrade/plan?${q(path)}`, req),
   upgrade: (path: string, req: UpgradeRequest) => request<ChangeResult>('POST', `/api/project/upgrade?${q(path)}`, req),

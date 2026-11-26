@@ -61,6 +61,27 @@ export interface UpgradeStep { project: string; kind: string; title: string; det
 export interface UpgradePlan { from: string; to: string; targetMajor: number; steps: UpgradeStep[]; warnings: string[]; canApply: boolean; projects: string[] }
 export interface UpgradeRequest { targetMajor: number; includeReferences: boolean }
 
+export interface SettingEntry { key: string; value: string | null; kind: 'string' | 'number' | 'bool' | 'null' | 'section' | 'array' | 'error'; secret: boolean }
+export interface SettingsFile { name: string; path: string; format: 'json' | 'xml'; environment: string | null; hasComments: boolean; entries: SettingEntry[] }
+export interface LaunchProfile { name: string; urls: string | null; environment: string | null }
+export interface SettingsInfo { files: SettingsFile[]; environments: string[]; launchProfiles: LaunchProfile[] }
+export interface SettingChange { key: string; value: string | null; kind: string; remove: boolean }
+
+export type DeployTarget = 'folder' | 'zip' | 'docker' | 'dockerRemote' | 'ssh' | 'webdeploy' | 'azure' | 'ftp'
+export interface DeployRequest {
+  target: DeployTarget; profileName?: string | null; configuration?: string; runtime?: string | null; selfContained?: boolean; singleFile?: boolean
+  environment?: string | null; outputPath?: string | null; imageName?: string | null; imageTag?: string | null; runLocally?: boolean; hostPort?: number | null
+  containerName?: string | null; push?: boolean; registry?: string | null; registryUser?: string | null; registryPassword?: string | null
+  host?: string | null; port?: number | null; user?: string | null; keyFile?: string | null; remotePath?: string | null; restartCommand?: string | null
+  siteName?: string | null; password?: string | null; resourceGroup?: string | null; appName?: string | null; ftps?: boolean
+}
+export interface DeployProfile { id: string; name: string; request: DeployRequest; saved: string }
+export interface DeployTools { docker: boolean; dockerRunning: boolean; dockerVersion: string | null; ssh: boolean; msDeploy: boolean; azureCli: boolean; visualStudio: boolean }
+export interface JobStatus { id: string; kind: string; title: string; state: 'running' | 'succeeded' | 'failed' | 'cancelled'; log: string[]; result: string | null; resultUrl: string | null; started: string; finished: string | null }
+
+export interface AssemblyEntry { name: string; path: string; version: string | null; framework: string | null; isOwnCode: boolean; isMainApp: boolean; controllers: number; types: number; size: number; obfuscated: boolean }
+export interface InspectResult { folder: string; assemblies: AssemblyEntry[]; mainApp: string | null }
+
 export interface HistoryEntry { id: string; time: string; description: string }
 
 export interface ProjectCapabilities {

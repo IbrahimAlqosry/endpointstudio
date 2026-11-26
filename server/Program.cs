@@ -21,6 +21,10 @@ builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddSingleton<EndpointWriter>();
 builder.Services.AddSingleton<ProjectGenerator>();
 builder.Services.AddSingleton<UpgradeService>();
+builder.Services.AddSingleton<JobService>();
+builder.Services.AddSingleton<SettingsService>();
+builder.Services.AddSingleton<DeployService>();
+builder.Services.AddSingleton<DecompileService>();
 
 var app = builder.Build();
 
@@ -173,6 +177,24 @@ api.MapGet("/solution", (string path, RecentProjectsStore recent) =>
     return details;
 });
 
+// ---------------------------------------------------------------- Settings
+api.MapGet("/project/settings", (string path, SettingsService settings) => settings.Load(path));
+api.MapPut("/project/settings", (string path, SaveSettingsRequest req, SettingsService settings) => new { message = settings.Save(path, req), settings = settings.Load(path) });
+api.MapPost("/project/settings/environment", (string path, NameBody body, SettingsService settings) => new { message = settings.AddEnvironment(path, body.Name), settings = settings.Load(path) });
+
+// ---------------------------------------------------------------- Publish, deploy & background tasks
+api.MapGet("/deploy/tools", (DeployService deploy) => deploy.ToolsAsync());
+api.MapGet("/project/deploy/profiles", (string path, DeployService deploy) => deploy.Profiles(path));
+api.MapPost("/project/deploy", (string path, DeployRequest req, DeployService deploy) => new { jobId = deploy.Start(path, req) });
+api.MapPost("/solution/build", (string path, DeployService deploy) => new { jobId = deploy.BuildSolution(path) });
+api.MapGet("/jobs", (string owner, JobService jobs) => jobs.ForOwner(Path.GetFullPath(owner)));
+api.MapGet("/jobs/{id}", (string id, JobService jobs) => jobs.Get(id));
+api.MapPost("/jobs/{id}/cancel", (string id, JobService jobs) => { jobs.Cancel(id); return Results.Ok(); });
+
+// ---------------------------------------------------------------- Recover code from published files
+api.MapPost("/decompile/inspect", (PathBody body, DecompileService d) => d.Inspect(body.Path));
+api.MapPost("/decompile/recover", (RecoverRequest req, DecompileService d) => new { jobId = d.Recover(req) });
+
 // ---------------------------------------------------------------- Database
 api.MapPost("/db/connect", async (DbConnectionInfo info, DatabaseService db, CancellationToken ct) =>
 {
@@ -220,3 +242,4 @@ static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService histo
 
 record PathBody(string Path, int? Line = null);
 record SqlTextBody(string? Sql);
+record NameBody(string Name);

@@ -9,7 +9,8 @@ A visual, no-code studio for **.NET Web APIs**, from **.NET Framework 4.x (ASP.N
 | **Projects & solutions** | Browse your computer for projects and solutions (`.sln` / `.slnx`), scan a folder, reopen recent items, show them in Explorer or open them in VS Code |
 | **Reads the whole solution** | Opening a project also reads the projects it references, so controllers in libraries, DbContexts in data projects and services (`IXxxService` → implementation) are found. The Solution page shows every project with its role (API, Services, Data access, Models, Tests), version, dependencies and endpoint count |
 | **Endpoint explorer** | Endpoints grouped by controller or route group, colour-coded HTTP methods, search, method filters and dashboard stats |
-| **Add endpoints** | A two-step wizard. Choose what the endpoint does, then fill in a form. Data actions (list, get, search, add, update and delete records) work against the project's EF Core tables. Simple actions (message, echo, placeholder, no content) take custom inputs from the path, query, body or headers |
+| **Add endpoints** | A two-step wizard that follows how the project is already built: **copy an existing endpoint** (same checks, envelope and error handling, with a different, or brand-new, service operation), **call a service operation**, **run SQL or a stored procedure** with the project's own driver and connection strings (with a safe test runner), use an **Entity Framework table**, or return a simple response |
+| **Endpoint details** | Every endpoint shows its access, inputs (where they come from, type, required), the service it calls, what it returns, possible results, an example request with a body built from the real request classes (also classes inside referenced DLLs), and its location in the code |
 | **Edit endpoints** | Change the HTTP method, path, name, description and sign-in requirement |
 | **Delete endpoints** | Removed cleanly after you confirm |
 | **Safety** | Every edit is checked for syntax before it's saved. Each change is recorded in a **History**, and **Undo** is one click away |
@@ -20,6 +21,9 @@ A visual, no-code studio for **.NET Web APIs**, from **.NET Framework 4.x (ASP.N
 | **Health check** | Scores the project and lists problems: duplicate routes, open endpoints in a protected API, keys and certificates in the project folder, passwords in config files, error details sent to callers, data changes through GET, unsupported .NET versions, old packages, missing descriptions |
 | **Upgrade assistant** | Moves .NET Core 2.x/3.x and .NET 5–9 projects (optionally with the projects they use) to a newer .NET: target framework (also in `Directory.Build.props`), version-matched packages (also in `Directory.Packages.props`), obsolete ASP.NET Core 2 packages, and package conflicts found by restore. One Undo reverts it all |
 | **Every .NET version** | Detects each project's .NET version and writes code that fits it (see the table below) |
+| **Settings** | View and edit `appsettings*.json` (and `Web.config`) as a friendly list: sections, secrets hidden until revealed, add/remove settings, add environments (Staging, Production…), undo |
+| **Publish & deploy** | Folder or network share (IIS-safe with `app_offline.htm`), ZIP, Docker image (build, run locally, push to a registry), Docker on a remote server over SSH, Linux server over SSH, IIS with Web Deploy, Azure App Service, FTP/FTPS. Live log, cancel, saved options per project (passwords are never saved). Build a whole solution from the Solution page |
+| **Recover code** | Turn a published app's `.dll` files back into C# projects (ICSharpCode.Decompiler, the ILSpy engine) linked in one solution, ready to open in the studio. Detects your own code, third-party libraries and obfuscated files. Only for code you own or may inspect |
 | **Look & feel** | Light, dark and system themes, and a responsive layout |
 
 ## How it works

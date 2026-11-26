@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { Icon } from '../components/Icon'
+import { JobView } from '../components/JobView'
 import { Button, Empty, Spinner, errorText, useToast } from '../components/ui'
 import { href, navigate } from '../router'
 import type { SolutionDetails, SolutionProjectInfo } from '../types'
@@ -19,6 +20,7 @@ export function SolutionPage({ path, onChanged }: { path: string; onChanged: () 
   const toast = useToast()
   const [sln, setSln] = useState<SolutionDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [buildJob, setBuildJob] = useState<string | null>(null)
 
   useEffect(() => {
     api.solution(path).then(s => { setSln(s); onChanged() }).catch(e => setError(errorText(e)))
@@ -55,7 +57,10 @@ export function SolutionPage({ path, onChanged }: { path: string; onChanged: () 
             <button className="btn ghost sm" style={{ flexShrink: 0 }} onClick={() => api.openEditor(sln.path).catch(e => toast.error(errorText(e)))}><Icon name="code" size={14} />Open in VS Code</button>
           </div>
         </div>
+        <Button variant="primary" icon="hammer" onClick={() => api.buildSolution(sln.path).then(r => setBuildJob(r.jobId)).catch(e => toast.error(errorText(e)))}>Build solution</Button>
       </div>
+
+      {buildJob && <div className="card pad" style={{ marginBottom: 20 }}><JobView key={buildJob} jobId={buildJob} /></div>}
 
       <div className="stats">
         <div className="card stat"><div className="stat-value">{sln.projects.length}</div><div className="stat-label">Projects</div></div>

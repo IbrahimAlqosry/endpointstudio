@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage'
 import { NewProjectPage } from './pages/NewProjectPage'
 import { ProjectPage } from './pages/ProjectPage'
 import { SolutionPage } from './pages/SolutionPage'
+import { RecoverPage } from './pages/RecoverPage'
 import { href, openPath, routeFor, useRoute } from './router'
 import type { RecentProject } from './types'
 
@@ -48,6 +49,7 @@ function Shell() {
           <a className={`nav-item${route.page === 'home' ? ' active' : ''}`} href={href({ page: 'home' })}><Icon name="home" size={17} /> Home</a>
           <button className="nav-item" onClick={() => setPicker(true)}><Icon name="folderOpen" size={17} /> Open project…</button>
           <a className={`nav-item${route.page === 'new' ? ' active' : ''}`} href={href({ page: 'new' })}><Icon name="database" size={17} /> New from database</a>
+          <a className={`nav-item${route.page === 'recover' ? ' active' : ''}`} href={href({ page: 'recover' })}><Icon name="wand" size={17} /> Recover code</a>
         </nav>
 
         {recent.length > 0 && (
@@ -91,6 +93,7 @@ function Shell() {
         {route.page === 'project' && <ProjectPage key={route.path} path={route.path} onChanged={refreshRecent} />}
         {route.page === 'solution' && <SolutionPage key={route.path} path={route.path} onChanged={refreshRecent} />}
         {route.page === 'new' && <NewProjectPage />}
+        {route.page === 'recover' && <RecoverPage />}
       </main>
 
       {picker && <FolderPicker mode="project" onPick={openProject} onClose={() => setPicker(false)} />}

@@ -3,7 +3,9 @@ import { api } from '../api'
 import { BuildDialog } from '../components/BuildDialog'
 import { EndpointDrawer } from '../components/EndpointDrawer'
 import { EndpointEditor } from '../components/EndpointEditor'
+import { DeployPanel } from '../components/DeployPanel'
 import { HealthDialog } from '../components/HealthDialog'
+import { SettingsPanel } from '../components/SettingsPanel'
 import { HistoryDialog } from '../components/HistoryDialog'
 import { UpgradeDialog } from '../components/UpgradeDialog'
 import { Icon } from '../components/Icon'
@@ -28,6 +30,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
   const [build, setBuild] = useState<BuildResult | 'loading' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
+  const [view, setView] = useState<'endpoints' | 'settings' | 'deploy'>(() => (new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') as 'settings' | 'deploy') || 'endpoints')
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [run, setRun] = useState<RunStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -180,6 +183,15 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
       )}
       {project.capabilities.buildNote && <div style={{ marginBottom: 14 }}><Alert kind="warning">{project.capabilities.buildNote}</Alert></div>}
 
+      <div className="tabs" style={{ marginTop: 0, marginBottom: 18 }}>
+        <button className={`tab${view === 'endpoints' ? ' active' : ''}`} onClick={() => setView('endpoints')}><span className="row gap-6"><Icon name="layers" size={15} />Endpoints <span className="badge" style={{ height: 18 }}>{project.endpoints.length}</span></span></button>
+        <button className={`tab${view === 'settings' ? ' active' : ''}`} onClick={() => setView('settings')}><span className="row gap-6"><Icon name="key" size={15} />Settings</span></button>
+        <button className={`tab${view === 'deploy' ? ' active' : ''}`} onClick={() => setView('deploy')}><span className="row gap-6"><Icon name="rocket" size={15} />Publish &amp; deploy</span></button>
+      </div>
+
+      {view === 'settings' && <SettingsPanel path={path} onChanged={load} />}
+      {view === 'deploy' && <DeployPanel project={project} />}
+      {view === 'endpoints' && <>
       <RunBar run={run} busy={busy} onToggle={toggleRun} onExport={exportPostman} canRun={project.capabilities.canRun} runNote={project.capabilities.runNote} framework={project.capabilities.platform === 'NetFramework'} />
 
       <SolutionStructure project={project} />
@@ -273,6 +285,8 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
           </div>
         )
       })}
+
+      </>}
 
       {selectedEp && (
         <EndpointDrawer
