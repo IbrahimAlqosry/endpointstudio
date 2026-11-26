@@ -35,6 +35,7 @@ export const api = {
 
   browse: (path?: string | null) => request<BrowseResult>('GET', `/api/fs/browse${path ? `?${q(path)}` : ''}`),
   findProjects: (root: string) => request<ProjectFileEntry[]>('GET', `/api/fs/find-projects?root=${encodeURIComponent(root)}`),
+  solutionProjects: (path: string) => request<ProjectFileEntry[]>('GET', `/api/fs/solution?${q(path)}`),
   reveal: (path: string) => request<void>('POST', '/api/fs/reveal', { path }),
   openEditor: (path: string) => request<void>('POST', '/api/fs/open-editor', { path }),
 

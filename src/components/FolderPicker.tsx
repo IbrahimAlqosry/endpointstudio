@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { BrowseResult, ProjectFileEntry } from '../types'
+import type { BrowseResult, ProjectFileEntry, SolutionEntry } from '../types'
 import { Icon } from './Icon'
 import { Alert, Button, Modal, Spinner, errorText } from './ui'
 
@@ -23,9 +23,17 @@ export function FolderPicker({ mode, onPick, onClose, initialPath }: {
   const [scan, setScan] = useState<ProjectFileEntry[] | null>(null)
   const [scanning, setScanning] = useState(false)
   const [filter, setFilter] = useState('')
+  const [openSln, setOpenSln] = useState<{ sln: SolutionEntry; projects: ProjectFileEntry[] | null } | null>(null)
+
+  const toggleSolution = async (sln: SolutionEntry) => {
+    if (openSln?.sln.path === sln.path) { setOpenSln(null); return }
+    setOpenSln({ sln, projects: null })
+    try { setOpenSln({ sln, projects: await api.solutionProjects(sln.path) }) }
+    catch (e) { setError(errorText(e)); setOpenSln(null) }
+  }
 
   const load = async (path: string | null) => {
-    setLoading(true); setError(null); setScan(null); setFilter('')
+    setLoading(true); setError(null); setScan(null); setFilter(''); setOpenSln(null)
     try {
       const r = await api.browse(path)
       setData(r)
@@ -83,14 +91,7 @@ export function FolderPicker({ mode, onPick, onClose, initialPath }: {
           </div>
           {scan.length > 0 && (
             <div className="folder-list" style={{ maxHeight: 200 }}>
-              {scan.map(p => (
-                <div key={p.path} className="folder-item project" onClick={() => onPick(p.path)}>
-                  <Icon name="box" size={17} />
-                  <span className="strong">{p.name}</span>
-                  <span className="tiny subtle truncate grow">{relative(p.path, data?.path)}</span>
-                  <Icon name="arrowRight" size={15} />
-                </div>
-              ))}
+              {scan.map(p => <ProjectRow key={p.path} p={p} hint={relative(p.path, data?.path)} onPick={onPick} />)}
             </div>
           )}
         </div>
@@ -106,12 +107,22 @@ export function FolderPicker({ mode, onPick, onClose, initialPath }: {
             <Icon name="arrowLeft" size={16} /><span className="muted">Up one level</span>
           </div>
         )}
-        {mode === 'project' && data?.projects.map(p => (
-          <div key={p.path} className="folder-item project" onClick={() => onPick(p.path)}>
-            <Icon name="box" size={17} />
-            <span className="strong grow">{p.name}</span>
-            <span className="badge accent">.NET project</span>
-            <Icon name="arrowRight" size={15} />
+        {mode === 'project' && data?.projects.map(p => <ProjectRow key={p.path} p={p} onPick={onPick} />)}
+        {mode === 'project' && data?.solutions.map(sln => (
+          <div key={sln.path}>
+            <div className="folder-item project" onClick={() => toggleSolution(sln)}>
+              <Icon name="layers" size={17} />
+              <span className="strong grow truncate">{sln.name}</span>
+              <span className="badge">Solution</span>
+              <Icon name={openSln?.sln.path === sln.path ? 'chevronDown' : 'chevronRight'} size={15} />
+            </div>
+            {openSln?.sln.path === sln.path && (
+              <div style={{ paddingLeft: 24, background: 'var(--bg-sunken)' }}>
+                {openSln.projects === null ? <div className="folder-item" style={{ cursor: 'default' }}><Spinner /> <span className="small subtle">Reading the solution…</span></div>
+                  : openSln.projects.length === 0 ? <div className="folder-item small subtle" style={{ cursor: 'default' }}>No C# projects in this solution.</div>
+                    : openSln.projects.map(p => <ProjectRow key={p.path} p={p} onPick={onPick} />)}
+              </div>
+            )}
           </div>
         ))}
         {folders.map(f => (
@@ -121,11 +132,25 @@ export function FolderPicker({ mode, onPick, onClose, initialPath }: {
             <Icon name="chevronRight" size={15} />
           </div>
         ))}
-        {data && !loading && folders.length === 0 && (data.projects.length === 0 || mode === 'folder') && (
+        {data && !loading && folders.length === 0 && (data.projects.length + data.solutions.length === 0 || mode === 'folder') && (
           <div className="folder-item subtle" style={{ cursor: 'default' }}>This folder is empty.</div>
         )}
       </div>
     </Modal>
+  )
+}
+
+function ProjectRow({ p, hint, onPick }: { p: ProjectFileEntry; hint?: string; onPick: (path: string) => void }) {
+  return (
+    <div className="folder-item project" onClick={() => onPick(p.path)} style={p.isWeb ? undefined : { opacity: .7 }} title={p.isWeb ? p.path : `${p.path}
+(class library: usually has no endpoints)`}>
+      <Icon name={p.isWeb ? 'server' : 'box'} size={17} />
+      <span className="strong truncate" style={{ minWidth: 0 }}>{p.name}</span>
+      <span className="tiny subtle truncate grow">{hint ?? ''}</span>
+      {p.framework && <span className={`badge${p.framework.startsWith('.NET Framework') ? ' warning' : ' accent'}`}>{p.framework}</span>}
+      {!p.isWeb && <span className="badge">Library</span>}
+      <Icon name="arrowRight" size={15} />
+    </div>
   )
 }
 

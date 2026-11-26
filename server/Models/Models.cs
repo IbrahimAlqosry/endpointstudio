@@ -3,8 +3,9 @@ namespace EndpointStudio.Server.Models;
 // ---------- File system ----------
 public record DriveEntry(string Name, string Path, string? Label);
 public record FolderEntry(string Name, string Path);
-public record ProjectFileEntry(string Name, string Path);
-public record BrowseResult(string? Path, string? Parent, List<FolderEntry> Folders, List<ProjectFileEntry> Projects);
+public record ProjectFileEntry(string Name, string Path, string? Framework, bool IsWeb);
+public record SolutionEntry(string Name, string Path);
+public record BrowseResult(string? Path, string? Parent, List<FolderEntry> Folders, List<ProjectFileEntry> Projects, List<SolutionEntry> Solutions);
 
 // ---------- Projects ----------
 public record RecentProject(string Name, string Path, DateTime LastOpened, int EndpointCount);

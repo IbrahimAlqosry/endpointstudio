@@ -73,6 +73,7 @@ api.MapGet("/system", async (DotnetService dotnet) =>
 // ---------------------------------------------------------------- File system
 api.MapGet("/fs/browse", (string? path, FileSystemService fs) => fs.Browse(path));
 api.MapGet("/fs/find-projects", (string root, FileSystemService fs) => fs.FindProjects(root));
+api.MapGet("/fs/solution", (string path, FileSystemService fs) => fs.SolutionProjects(path));
 
 api.MapPost("/fs/reveal", (PathBody body) =>
 {

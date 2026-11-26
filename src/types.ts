@@ -3,8 +3,9 @@ export type ParamSource = 'Route' | 'Query' | 'Body' | 'Header' | 'Service'
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface FolderEntry { name: string; path: string }
-export interface ProjectFileEntry { name: string; path: string }
-export interface BrowseResult { path: string | null; parent: string | null; folders: FolderEntry[]; projects: ProjectFileEntry[] }
+export interface ProjectFileEntry { name: string; path: string; framework: string | null; isWeb: boolean }
+export interface SolutionEntry { name: string; path: string }
+export interface BrowseResult { path: string | null; parent: string | null; folders: FolderEntry[]; projects: ProjectFileEntry[]; solutions: SolutionEntry[] }
 
 export interface RecentProject { name: string; path: string; lastOpened: string; endpointCount: number }
 

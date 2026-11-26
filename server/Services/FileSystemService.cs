@@ -1,12 +1,18 @@
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using EndpointStudio.Server.Models;
 
 namespace EndpointStudio.Server.Services;
 
 public class FileSystemService
 {
+    // Only tool and build-output folders are skipped. Folder names that merely start with a dot
+    // (for example ".Net6" or ".Net-core-template") are normal folders and are shown.
     private static readonly HashSet<string> SkipFolders = new(StringComparer.OrdinalIgnoreCase)
     {
-        "bin", "obj", "node_modules", ".git", ".vs", ".idea", "packages", "$RECYCLE.BIN", "System Volume Information"
+        "bin", "obj", "node_modules", "packages", ".git", ".vs", ".idea", ".vscode", ".svn", ".hg",
+        ".github", ".gitlab", ".nuget", ".config", ".angular", ".next", ".cache",
+        "$RECYCLE.BIN", "System Volume Information",
     };
 
     public List<DriveEntry> GetDrives() =>
@@ -20,6 +26,13 @@ public class FileSystemService
         try { return string.IsNullOrWhiteSpace(d.VolumeLabel) ? null : d.VolumeLabel; } catch { return null; }
     }
 
+    private static bool ShouldSkip(DirectoryInfo d)
+    {
+        if (SkipFolders.Contains(d.Name)) return true;
+        try { return (d.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0; }
+        catch { return true; }
+    }
+
     public BrowseResult Browse(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -27,7 +40,7 @@ public class FileSystemService
             var drives = GetDrives().Select(d => new FolderEntry(d.Label is null ? d.Name : $"{d.Name} ({d.Label})", d.Path)).ToList();
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             drives.Insert(0, new FolderEntry("Home", home));
-            return new BrowseResult(null, null, drives, []);
+            return new BrowseResult(null, null, drives, [], []);
         }
 
         var dir = new DirectoryInfo(path);
@@ -38,8 +51,7 @@ public class FileSystemService
         {
             foreach (var d in dir.EnumerateDirectories().OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase))
             {
-                if (SkipFolders.Contains(d.Name) || d.Name.StartsWith('.')) continue;
-                if ((d.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0) continue;
+                if (ShouldSkip(d)) continue;
                 folders.Add(new FolderEntry(d.Name, d.FullName));
             }
         }
@@ -48,37 +60,88 @@ public class FileSystemService
             throw new StudioException("You don't have permission to open this folder.");
         }
 
-        var projects = dir.EnumerateFiles("*.csproj")
-            .Select(f => new ProjectFileEntry(Path.GetFileNameWithoutExtension(f.Name), f.FullName))
+        var projects = dir.EnumerateFiles("*.csproj").Select(f => Describe(f.FullName)).ToList();
+        var solutions = dir.EnumerateFiles("*.sln").Concat(dir.EnumerateFiles("*.slnx"))
+            .Select(f => new SolutionEntry(Path.GetFileNameWithoutExtension(f.Name), f.FullName))
             .ToList();
 
-        return new BrowseResult(dir.FullName, dir.Parent?.FullName, folders, projects);
+        return new BrowseResult(dir.FullName, dir.Parent?.FullName, folders, projects, solutions);
     }
 
-    /// <summary>Finds .csproj files below a folder (limited depth).</summary>
-    public List<ProjectFileEntry> FindProjects(string root, int maxDepth = 4)
+    /// <summary>Finds .csproj files below a folder.</summary>
+    public List<ProjectFileEntry> FindProjects(string root, int maxDepth = 7)
     {
         var result = new List<ProjectFileEntry>();
         if (!Directory.Exists(root)) throw new StudioException("That folder doesn't exist.");
         Walk(new DirectoryInfo(root), 0);
-        return result.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        return result.OrderBy(p => p.Path, StringComparer.OrdinalIgnoreCase).ToList();
 
         void Walk(DirectoryInfo d, int depth)
         {
-            if (result.Count >= 200) return;
+            if (result.Count >= 500) return;
             try
             {
                 foreach (var f in d.EnumerateFiles("*.csproj"))
-                    result.Add(new ProjectFileEntry(Path.GetFileNameWithoutExtension(f.Name), f.FullName));
+                    result.Add(Describe(f.FullName));
                 if (depth >= maxDepth) return;
                 foreach (var sub in d.EnumerateDirectories())
                 {
-                    if (SkipFolders.Contains(sub.Name) || sub.Name.StartsWith('.')) continue;
+                    if (ShouldSkip(sub)) continue;
                     Walk(sub, depth + 1);
                 }
             }
             catch (UnauthorizedAccessException) { }
             catch (IOException) { }
+        }
+    }
+
+    /// <summary>Lists the C# projects that belong to a solution (.sln or .slnx).</summary>
+    public List<ProjectFileEntry> SolutionProjects(string solutionPath)
+    {
+        if (!File.Exists(solutionPath)) throw new StudioException("That solution file doesn't exist anymore.");
+        var dir = Path.GetDirectoryName(solutionPath)!;
+        var relPaths = new List<string>();
+        if (solutionPath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                relPaths.AddRange(XDocument.Load(solutionPath).Descendants()
+                    .Where(e => e.Name.LocalName == "Project")
+                    .Select(e => (string?)e.Attribute("Path") ?? ""));
+            }
+            catch { throw new StudioException("The solution file couldn't be read."); }
+        }
+        else
+        {
+            foreach (Match m in Regex.Matches(File.ReadAllText(solutionPath), @"^Project\(""\{[^}]+\}""\)\s*=\s*""[^""]*""\s*,\s*""([^""]+)""", RegexOptions.Multiline))
+                relPaths.Add(m.Groups[1].Value);
+        }
+
+        return relPaths
+            .Where(p => p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .Select(p => Path.GetFullPath(Path.Combine(dir, p.Replace('\\', Path.DirectorySeparatorChar))))
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(Describe)
+            .OrderByDescending(p => p.IsWeb)
+            .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>Reads just enough of a project file to show its name, .NET version and whether it is a web project.</summary>
+    private static ProjectFileEntry Describe(string csprojPath)
+    {
+        var name = Path.GetFileNameWithoutExtension(csprojPath);
+        try
+        {
+            var pf = ProjectFile.Load(csprojPath);
+            var tfm = pf.TargetFramework;
+            var (_, _, label) = ProjectAnalyzer.DescribeFramework(tfm);
+            return new ProjectFileEntry(name, csprojPath, string.IsNullOrEmpty(tfm) ? null : label, pf.IsWeb);
+        }
+        catch
+        {
+            return new ProjectFileEntry(name, csprojPath, null, false);
         }
     }
 }

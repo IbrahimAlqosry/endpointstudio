@@ -124,19 +124,17 @@ public static class ProjectAnalyzer
         var dir = Path.GetDirectoryName(Path.GetFullPath(csprojPath))!;
         var name = Path.GetFileNameWithoutExtension(csprojPath);
 
-        XDocument doc;
-        try { doc = XDocument.Load(csprojPath); }
+        ProjectFile pf;
+        try { pf = ProjectFile.Load(csprojPath); }
         catch { throw new StudioException("The project file is damaged or not a valid .NET project."); }
+        var doc = pf.Document;
+        string? Prop(string n) => pf.Property(n);
 
-        var props = doc.Descendants().Where(e => e.Parent?.Name.LocalName == "PropertyGroup").ToList();
-        string? Prop(string n) => props.FirstOrDefault(e => e.Name.LocalName == n)?.Value.Trim();
-
-        var sdk = (string?)doc.Root?.Attribute("Sdk") ?? "";
-        var legacy = sdk.Length == 0 && doc.Root?.Elements().All(e => e.Name.LocalName != "Sdk") == true;
-        var tfm = Prop("TargetFramework") ?? Prop("TargetFrameworks")?.Split(';').FirstOrDefault()
-                  ?? (Prop("TargetFrameworkVersion") is { } tfv ? "net" + tfv.TrimStart('v').Replace(".", "") : "unknown");
+        var tfm = pf.TargetFramework.Length > 0 ? pf.TargetFramework : "unknown";
+        var rootNs = Prop("RootNamespace") ?? Regex.Replace(Prop("AssemblyName") ?? name, @"[^A-Za-z0-9_.]", "_");
+        var sdk = pf.Sdk;
+        var legacy = pf.IsLegacy;
         var (platform, major, label) = DescribeFramework(tfm);
-        var rootNs = Prop("RootNamespace") ?? Regex.Replace(name, @"[^A-Za-z0-9_.]", "_");
         var packages = doc.Descendants().Where(e => e.Name.LocalName == "PackageReference")
             .Select(e => (string?)e.Attribute("Include") ?? (string?)e.Attribute("Update") ?? "")
             .Where(s => s.Length > 0).ToList();
@@ -152,7 +150,6 @@ public static class ProjectAnalyzer
         }
         var references = doc.Descendants().Where(e => e.Name.LocalName == "Reference")
             .Select(e => ((string?)e.Attribute("Include") ?? "").Split(',')[0].Trim()).ToList();
-        var projectTypes = Prop("ProjectTypeGuids") ?? "";
 
         var model = new ProjectModel
         {
@@ -169,11 +166,8 @@ public static class ProjectAnalyzer
             NullableEnabled = string.Equals(Prop("Nullable"), "enable", StringComparison.OrdinalIgnoreCase),
             ImplicitUsings = string.Equals(Prop("ImplicitUsings"), "enable", StringComparison.OrdinalIgnoreCase) || string.Equals(Prop("ImplicitUsings"), "true", StringComparison.OrdinalIgnoreCase),
             IsLegacyProject = legacy,
-            IsWebProject = sdk.Contains("Web", StringComparison.OrdinalIgnoreCase)
-                           || doc.Descendants().Any(e => e.Name.LocalName == "FrameworkReference" && ((string?)e.Attribute("Include"))?.Contains("AspNetCore") == true)
-                           || projectTypes.Contains("349C5851-65DF-11DA-9384-00065B846F21", StringComparison.OrdinalIgnoreCase)
-                           || references.Contains("System.Web.Http") || packages.Any(p => p.StartsWith("Microsoft.AspNet.WebApi", StringComparison.OrdinalIgnoreCase))
-                           || packages.Any(p => p.StartsWith("Microsoft.AspNetCore", StringComparison.OrdinalIgnoreCase)),
+            IsWebProject = pf.IsWeb || references.Contains("System.Web.Http")
+                           || packages.Any(p => p.StartsWith("Microsoft.AspNet.WebApi", StringComparison.OrdinalIgnoreCase)),
         };
 
         if (!model.IsWebProject)
@@ -215,13 +209,9 @@ public static class ProjectAnalyzer
     {
         try
         {
-            var doc = XDocument.Load(csprojPath);
-            string? Prop(string n) => doc.Descendants().FirstOrDefault(e => e.Name.LocalName == n && e.Parent?.Name.LocalName == "PropertyGroup")?.Value.Trim();
-            var legacy = doc.Root?.Attribute("Sdk") is null && doc.Root?.Elements().All(e => e.Name.LocalName != "Sdk") == true;
-            var tfm = Prop("TargetFramework") ?? Prop("TargetFrameworks")?.Split(';').FirstOrDefault()
-                      ?? (Prop("TargetFrameworkVersion") is { } tfv ? "net" + tfv.TrimStart('v').Replace(".", "") : "");
-            var (p, major, _) = DescribeFramework(tfm);
-            return (p, major, legacy);
+            var pf = ProjectFile.Load(csprojPath);
+            var (p, major, _) = DescribeFramework(pf.TargetFramework);
+            return (p, major, pf.IsLegacy);
         }
         catch { return (ProjectPlatform.NetCore, 0, false); }
     }
@@ -237,8 +227,8 @@ public static class ProjectAnalyzer
             if (!isRoot)
             {
                 var n = d.Name;
-                if (n.Equals("bin", StringComparison.OrdinalIgnoreCase) || n.Equals("obj", StringComparison.OrdinalIgnoreCase) ||
-                    n.StartsWith('.') || n.Equals("node_modules", StringComparison.OrdinalIgnoreCase)) return;
+                if (n is "bin" or "obj" or "node_modules" or ".git" or ".vs" or ".idea" or ".vscode" ||
+                    n.Equals("bin", StringComparison.OrdinalIgnoreCase) || n.Equals("obj", StringComparison.OrdinalIgnoreCase)) return;
                 if (d.EnumerateFiles("*.csproj").Any()) return; // another project
             }
             foreach (var f in d.EnumerateFiles("*.cs"))
