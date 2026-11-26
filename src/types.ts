@@ -27,6 +27,8 @@ export interface EndpointInfo {
   requiresAuth: boolean
   file: string
   line: number
+  calls?: string | null
+  bodySample?: string | null
 }
 
 export interface EndpointGroup { key: string; name: string; style: EndpointStyle; baseRoute: string; file: string; endpointCount: number }
@@ -44,7 +46,12 @@ export interface EntityInfo {
 }
 
 export interface ProjectRefInfo { name: string; path: string; framework: string | null; role: string; isWeb: boolean }
-export interface ServiceInfo { interface: string; implementation: string | null; project: string; methods: number }
+export interface ServiceParam { name: string; type: string; friendly: string; injected: boolean }
+export interface ServiceOperation { name: string; parameters: ServiceParam[]; returnType: string; returns: string; isAsync: boolean; exposed: boolean }
+export interface ServiceInfo { interface: string; implementation: string | null; project: string; methods: number; namespace: string; operations: ServiceOperation[] }
+export interface DataAccessInfo { sqlProviders: string[]; connectionStrings: string[] }
+export interface SqlTestRequest { provider: string; connectionName: string | null; connectionString: string | null; sql: string; values: Record<string, string | null> }
+export interface SqlTestResult { columns: string[]; rows: (string | null)[][]; more: boolean; durationMs: number }
 export interface SolutionProjectInfo { name: string; path: string; framework: string | null; role: string; isWeb: boolean; references: string[]; endpointCount: number | null; fileCount: number }
 export interface SolutionDetails { name: string; path: string; projects: SolutionProjectInfo[] }
 
@@ -86,6 +93,7 @@ export interface ProjectDetails {
   referencedProjects: ProjectRefInfo[]
   binaryReferences: string[]
   services: ServiceInfo[]
+  dataAccess: DataAccessInfo
 }
 
 export interface AddEndpointRequest {
@@ -101,6 +109,15 @@ export interface AddEndpointRequest {
   entity: string | null
   filterProperty: string | null
   parameters: EndpointParam[] | null
+  serviceInterface?: string | null
+  serviceOperation?: string | null
+  newOperation?: boolean
+  templateEndpointId?: string | null
+  sql?: string | null
+  sqlKind?: 'query' | 'procedure' | null
+  sqlProvider?: string | null
+  connectionName?: string | null
+  connectionString?: string | null
 }
 
 export interface UpdateEndpointRequest { httpMethod: string; route: string; name: string; summary: string | null; requiresAuth: boolean }

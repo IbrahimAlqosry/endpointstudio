@@ -8,8 +8,10 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace EndpointStudio.Server.Codegen;
 
 /// <summary>Adds, edits and removes endpoints in a user's project.</summary>
-public class EndpointWriter(HistoryService history)
+public partial class EndpointWriter(HistoryService history)
 {
+    private HistoryService History => history;
+
     private static readonly Regex IdentifierRx = new("^[A-Za-z_][A-Za-z0-9_]*$");
     private static readonly Regex RouteRx = new(@"^[A-Za-z0-9_\-./{}:?*~=]*$");
 
@@ -28,6 +30,8 @@ public class EndpointWriter(HistoryService history)
         var name = ValidateName(req.Name);
         var route = ValidateRoute(req.Route);
 
+        if (req.Behavior == Behaviors.Template) return CloneEndpoint(model, req, verb, route, name);
+
         GroupRecord? group = null;
         if (req.NewGroup is null)
         {
@@ -43,13 +47,16 @@ public class EndpointWriter(HistoryService history)
         EnsureNoConflict(model, verb, fullRoute, null);
         EnsureNameAvailable(model, style, group, name, null);
 
-        var plan = BuildPlan(model, req, verb, route, fullRoute);
+        var plan = BuildPlan(model, req, verb, route, fullRoute, group);
         var changes = history.Begin(model.CsprojPath, $"Added {verb} {fullRoute}");
 
         if (group is not null && style == EndpointStyle.Controller) AddToController(model, group, changes, plan, verb, route, name, req);
         else if (group is not null) AddToMinimalGroup(model, group, changes, plan, verb, route, name, req);
         else if (style == EndpointStyle.Controller) CreateController(model, req.NewGroup!, changes, plan, verb, route, name, req);
         else CreateMinimalGroup(model, req.NewGroup!, changes, plan, verb, route, name, req);
+
+        if (plan.AddPackage is { } pkg) AddPackageReference(model, changes, pkg.Id, pkg.Version);
+        if (plan.AddConnectionString is { } cs) AddConnectionString(model, changes, cs.Name, cs.Value);
 
         changes.Commit();
         return $"{verb} {fullRoute} was added.";
@@ -70,6 +77,8 @@ public class EndpointWriter(HistoryService history)
         public string? CreateContext { get; set; }
         public required bool Framework { get; init; }
         public required bool Nullable { get; init; }
+        public (string Id, string Version)? AddPackage { get; set; }
+        public (string Name, string Value)? AddConnectionString { get; set; }
     }
 
     private static readonly HashSet<string> ValueTypes = new(StringComparer.Ordinal)
@@ -96,10 +105,13 @@ public class EndpointWriter(HistoryService history)
         return plan;
     }
 
-    private static Plan BuildPlan(ProjectModel model, AddEndpointRequest req, string verb, string route, string fullRoute)
+    private static Plan BuildPlan(ProjectModel model, AddEndpointRequest req, string verb, string route, string fullRoute, GroupRecord? group)
     {
         var plan = NewPlan(model);
         var routeParams = ProjectAnalyzer.RouteParameterNames(route);
+
+        if (req.Behavior == Behaviors.ServiceCall) { BuildServiceCall(model, req, plan, routeParams, group); return plan; }
+        if (req.Behavior == Behaviors.Sql) { BuildSql(model, req, plan, routeParams, verb); return plan; }
 
         if (Behaviors.IsEntity(req.Behavior))
         {

@@ -86,10 +86,13 @@ api.MapPost("/fs/reveal", (PathBody body) =>
 
 api.MapPost("/fs/open-editor", (PathBody body) =>
 {
-    var target = File.Exists(body.Path) ? Path.GetDirectoryName(body.Path)! : body.Path;
+    // A source file with a line opens at that line; a project opens its folder
+    var args = body.Line is > 0 && File.Exists(body.Path) && body.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+        ? $"-g \"{body.Path}:{body.Line}\""
+        : $"\"{(File.Exists(body.Path) ? Path.GetDirectoryName(body.Path)! : body.Path)}\"";
     try
     {
-        Process.Start(new ProcessStartInfo("code", $"\"{target}\"") { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
+        Process.Start(new ProcessStartInfo("code", args) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
     }
     catch
     {
@@ -145,6 +148,9 @@ api.MapPost("/project/upgrade", async (string path, UpgradeRequest req, UpgradeS
     var message = await upgrade.ApplyAsync(path, req, ct);
     return new { message, project = await ToDetails(ProjectAnalyzer.Analyze(path), history, dotnet) };
 });
+
+api.MapPost("/project/sql/test", (string path, SqlTestRequest req, CancellationToken ct) => SqlTestService.RunAsync(ProjectAnalyzer.Analyze(path), req, ct));
+api.MapPost("/sql/parameters", (SqlTextBody body) => EndpointWriter.SqlParameterNames(body.Sql ?? ""));
 
 api.MapPost("/project/build", (string path, DotnetService dotnet, CancellationToken ct) => dotnet.BuildAsync(path, ct));
 
@@ -209,6 +215,8 @@ static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService histo
     m.SolutionPath,
     m.ReferencedProjects,
     m.BinaryReferences,
-    m.Services);
+    m.Services,
+    new DataAccessInfo(m.SqlProviders, m.ConnectionStrings));
 
-record PathBody(string Path);
+record PathBody(string Path, int? Line = null);
+record SqlTextBody(string? Sql);

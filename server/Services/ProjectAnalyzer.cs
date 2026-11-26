@@ -22,7 +22,7 @@ public class SourceFile
 
 public class EndpointRecord
 {
-    public required EndpointInfo Info { get; init; }
+    public required EndpointInfo Info { get; set; }
     public required SourceFile File { get; init; }
     public required GroupRecord Group { get; init; }
     // Controller endpoints
@@ -63,6 +63,10 @@ public class ProjectModel
     public List<ProjectRefInfo> ReferencedProjects { get; } = [];
     public List<string> BinaryReferences { get; } = [];
     public List<ServiceInfo> Services { get; } = [];
+    /// <summary>Package ids of this project and every project it references.</summary>
+    public HashSet<string> AllPackages { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<string> SqlProviders { get; } = [];
+    public List<string> ConnectionStrings { get; } = [];
     public string? SolutionPath { get; set; }
 
     /// <summary>.NET Framework (ASP.NET Web API 2) or modern .NET / .NET Core.</summary>
@@ -195,9 +199,62 @@ public static class ProjectAnalyzer
             FindControllers(model, file);
             FindMinimalApis(model, file);
         }
+        foreach (var pkg in packages) model.AllPackages.Add(pkg);
+        foreach (var r in references) model.AllPackages.Add(r);
         FindEntities(model);
         FindServices(model);
+        FindDataAccess(model);
+        LinkServiceCalls(model);
+        AddBodySamples(model);
         return model;
+    }
+
+    /// <summary>Example JSON for endpoints that receive a body, built from the real request classes.</summary>
+    private static void AddBodySamples(ProjectModel model)
+    {
+        var withBody = model.Endpoints.Where(e => e.Info.Parameters.Any(p => p.Source == ParamSource.Body)).ToList();
+        if (withBody.Count == 0) return;
+        var builder = new SampleBuilder(model);
+        foreach (var rec in withBody)
+        {
+            var raw = SampleBuilder.RawBodyType(rec);
+            if (raw is null) continue;
+            try { if (builder.For(raw) is { } json) rec.Info = rec.Info with { BodySample = json }; }
+            catch { /* a sample is a nice-to-have */ }
+        }
+    }
+
+    /// <summary>Notes which service operation each endpoint calls (for example IGeneralService.GetMenus).</summary>
+    private static void LinkServiceCalls(ProjectModel model)
+    {
+        var ops = model.Services.SelectMany(s => s.Operations.Select(o => (s.Interface, o.Name)))
+            .GroupBy(x => x.Name).ToDictionary(g => g.Key, g => g.First().Interface);
+        if (ops.Count == 0) return;
+        foreach (var rec in model.Endpoints)
+        {
+            SyntaxNode? body = rec.Method is not null ? (SyntaxNode?)rec.Method.Body ?? rec.Method.ExpressionBody : rec.OuterCall;
+            var call = body?.DescendantNodes().OfType<InvocationExpressionSyntax>()
+                .Select(i => i.Expression is MemberAccessExpressionSyntax ma ? ma.Name.Identifier.Text : null)
+                .FirstOrDefault(n => n is not null && ops.ContainsKey(n));
+            if (call is not null) rec.Info = rec.Info with { Calls = $"{ops[call]}.{call}" };
+        }
+    }
+
+    /// <summary>Finds endpoints in a piece of code that isn't part of the project yet (used when copying an endpoint).</summary>
+    public static List<EndpointRecord> ParseEndpoints(ProjectModel like, string relative, string text)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, ParseOptions);
+        var file = new SourceFile { Path = Path.Combine(like.Directory, "__copy__.cs"), Relative = relative, Text = text, Root = (CompilationUnitSyntax)tree.GetRoot(), Project = like.Name };
+        var temp = new ProjectModel
+        {
+            CsprojPath = like.CsprojPath, Directory = like.Directory, Name = like.Name, TargetFramework = like.TargetFramework,
+            RootNamespace = like.RootNamespace, Packages = like.Packages, Files = [file], Platform = like.Platform,
+            FrameworkVersion = like.FrameworkVersion, FrameworkLabel = like.FrameworkLabel, NullableEnabled = like.NullableEnabled,
+            ImplicitUsings = like.ImplicitUsings, IsLegacyProject = like.IsLegacyProject,
+        };
+        FindControllers(temp, file);
+        FindMinimalApis(temp, file);
+        return temp.Endpoints;
     }
 
     private static void LoadReferencedProjects(ProjectModel model, ProjectFile pf, string csprojPath, HashSet<string> visited, int depth)
@@ -214,6 +271,8 @@ public static class ProjectAnalyzer
             var refName = Path.GetFileNameWithoutExtension(path);
             var files = LoadSources(Path.GetDirectoryName(path)!, model.Directory, refName, true);
             model.Files.AddRange(files);
+            foreach (var pkg in refPf.Document.Descendants().Where(e => e.Name.LocalName == "PackageReference").Select(e => (string?)e.Attribute("Include")))
+                if (!string.IsNullOrEmpty(pkg)) model.AllPackages.Add(pkg);
             var (_, _, label) = DescribeFramework(refPf.TargetFramework);
             model.ReferencedProjects.Add(new ProjectRefInfo(refName, path, refPf.TargetFramework.Length > 0 ? label : null,
                 DetectRole(refName, refPf, files.Select(f => f.Text)), refPf.IsWeb));
@@ -263,15 +322,70 @@ public static class ProjectAnalyzer
             .Where(x => Regex.IsMatch(x.Node.Identifier.Text, @"^I[A-Z]\w*(Service|Repository|Manager|Provider)$"))
             .ToList();
         var classes = model.Files.SelectMany(f => f.Root.DescendantNodes().OfType<ClassDeclarationSyntax>().Select(c => (File: f, Node: c))).ToList();
+        // Which operations endpoints already call (".OperationName(" inside an endpoint)
+        var endpointBodies = string.Concat(model.Endpoints.Select(e => e.Method?.ToString() ?? e.OuterCall?.ToString() ?? ""));
         foreach (var (file, iface) in interfaces)
         {
             var name = iface.Identifier.Text;
             var impl = classes.FirstOrDefault(c => c.Node.BaseList?.Types.Any(t => SimpleName(t.Type) == name) == true);
-            model.Services.Add(new ServiceInfo(
-                name,
-                impl.Node?.Identifier.Text,
-                file.Project,
-                iface.Members.OfType<MethodDeclarationSyntax>().Count()));
+            var ops = iface.Members.OfType<MethodDeclarationSyntax>().Select(md =>
+            {
+                var ret = md.ReturnType.ToString();
+                var isAsync = Regex.IsMatch(ret, @"^(Task|ValueTask)\b");
+                return new ServiceOperation(
+                    md.Identifier.Text,
+                    md.ParameterList.Parameters.Select(p => new ServiceParam(p.Identifier.Text, p.Type?.ToString() ?? "object", FriendlyType(p.Type?.ToString() ?? "object"), IsServiceLike(SimpleTypeName(p.Type?.ToString() ?? "")))).ToList(),
+                    ret,
+                    FriendlyReturn(md.ReturnType),
+                    isAsync,
+                    endpointBodies.Contains("." + md.Identifier.Text + "(", StringComparison.Ordinal));
+            }).ToList();
+            model.Services.Add(new ServiceInfo(name, impl.Node?.Identifier.Text, file.Project, ops.Count, NamespaceOf(iface), ops));
+        }
+    }
+
+    private static string SimpleTypeName(string type)
+    {
+        var t = type.Contains('<') ? type[..type.IndexOf('<')] : type;
+        return t.Split('.').Last().TrimEnd('?');
+    }
+
+    /// <summary>ADO.NET drivers the project (or the projects it uses) can already reach, and its connection strings.</summary>
+    private static void FindDataAccess(ProjectModel model)
+    {
+        var pkgs = model.AllPackages;
+        void Add(string provider) { if (!model.SqlProviders.Contains(provider)) model.SqlProviders.Add(provider); }
+        bool Has(params string[] ids) => ids.Any(id => pkgs.Contains(id) || model.BinaryReferences.Any(b => b.Equals(id, StringComparison.OrdinalIgnoreCase)));
+        if (Has("Oracle.ManagedDataAccess", "Oracle.ManagedDataAccess.Core", "Oracle.EntityFrameworkCore")) Add("Oracle");
+        if (Has("Microsoft.Data.SqlClient", "System.Data.SqlClient", "Microsoft.EntityFrameworkCore.SqlServer") || model.IsFramework) Add("SqlServer");
+        if (Has("Npgsql", "Npgsql.EntityFrameworkCore.PostgreSQL")) Add("PostgreSql");
+        if (Has("MySqlConnector", "MySql.Data", "Pomelo.EntityFrameworkCore.MySql")) Add("MySql");
+        if (Has("Microsoft.Data.Sqlite", "Microsoft.EntityFrameworkCore.Sqlite")) Add("Sqlite");
+
+        foreach (var cfg in new[] { "appsettings.json", "appsettings.Development.json" })
+        {
+            var path = Path.Combine(model.Directory, cfg);
+            if (!File.Exists(path)) continue;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path),
+                    new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true });
+                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("ConnectionStrings", out var cs) && cs.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    foreach (var p in cs.EnumerateObject())
+                        if (!model.ConnectionStrings.Contains(p.Name)) model.ConnectionStrings.Add(p.Name);
+            }
+            catch { /* unreadable settings file */ }
+        }
+        var webConfig = Path.Combine(model.Directory, "Web.config");
+        if (File.Exists(webConfig))
+        {
+            try
+            {
+                foreach (var add in XDocument.Load(webConfig).Descendants("connectionStrings").Descendants("add"))
+                    if ((string?)add.Attribute("name") is { } n && !model.ConnectionStrings.Contains(n)) model.ConnectionStrings.Add(n);
+            }
+            catch { /* ignore */ }
         }
     }
 

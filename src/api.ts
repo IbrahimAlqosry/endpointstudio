@@ -1,6 +1,6 @@
 import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
-  GenerateProjectResult, HealthReport, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
+  GenerateProjectResult, HealthReport, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
 } from './types'
 
 export class ApiError extends Error {}
@@ -37,7 +37,7 @@ export const api = {
   findProjects: (root: string) => request<ProjectFileEntry[]>('GET', `/api/fs/find-projects?root=${encodeURIComponent(root)}`),
   solutionProjects: (path: string) => request<ProjectFileEntry[]>('GET', `/api/fs/solution?${q(path)}`),
   reveal: (path: string) => request<void>('POST', '/api/fs/reveal', { path }),
-  openEditor: (path: string) => request<void>('POST', '/api/fs/open-editor', { path }),
+  openEditor: (path: string, line?: number) => request<void>('POST', '/api/fs/open-editor', { path, line }),
 
   recent: () => request<RecentProject[]>('GET', '/api/projects/recent'),
   forget: (path: string) => request<void>('DELETE', `/api/projects/recent?${q(path)}`),
@@ -49,6 +49,8 @@ export const api = {
   deleteEndpoint: (path: string, id: string) => request<ChangeResult>('DELETE', `/api/project/endpoints/${encodeURIComponent(id)}?${q(path)}`),
   undo: (path: string) => request<ChangeResult>('POST', `/api/project/undo?${q(path)}`),
   build: (path: string) => request<BuildResult>('POST', `/api/project/build?${q(path)}`),
+  sqlTest: (path: string, req: SqlTestRequest) => request<SqlTestResult>('POST', `/api/project/sql/test?${q(path)}`, req),
+  sqlParameters: (sql: string) => request<string[]>('POST', '/api/sql/parameters', { sql }),
   health: (path: string) => request<HealthReport>('GET', `/api/project/health?${q(path)}`),
   upgradePlan: (path: string, req: UpgradeRequest) => request<UpgradePlan>('POST', `/api/project/upgrade/plan?${q(path)}`, req),
   upgrade: (path: string, req: UpgradeRequest) => request<ChangeResult>('POST', `/api/project/upgrade?${q(path)}`, req),

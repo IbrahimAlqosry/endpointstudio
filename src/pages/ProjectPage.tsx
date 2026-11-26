@@ -22,9 +22,9 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
   const [search, setSearch] = useState('')
   const [methodFilter, setMethodFilter] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('endpoint'))
   const [drawerTab, setDrawerTab] = useState<'overview' | 'try'>('overview')
-  const [editor, setEditor] = useState<{ mode: 'add'; groupKey?: string } | { mode: 'edit'; endpoint: EndpointInfo } | null>(null)
+  const [editor, setEditor] = useState<{ mode: 'add'; groupKey?: string; templateId?: string } | { mode: 'edit'; endpoint: EndpointInfo } | null>(null)
   const [build, setBuild] = useState<BuildResult | 'loading' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
@@ -242,15 +242,28 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
                 <div style={{ minWidth: 0 }}>
                   <div className="row gap-6">
                     <RouteText route={ep.route} />
-                    {ep.requiresAuth && <span title="Requires sign-in" style={{ color: 'var(--warning)', display: 'inline-flex' }}><Icon name="lock" size={14} /></span>}
+                    {ep.requiresAuth
+                      ? <span className="badge warning" style={{ height: 20 }} title="Requires sign-in"><Icon name="lock" size={11} />Sign-in</span>
+                      : <span className="badge" style={{ height: 20 }} title="Anyone can call it"><Icon name="unlock" size={11} />Public</span>}
+                    {ep.project !== project.name && <span className="badge" style={{ height: 20 }}>{ep.project}</span>}
                   </div>
                   <div className="meta">
                     {ep.name && <span className="small strong muted">{splitWords(ep.name)}</span>}
-                    {ep.summary && <span className="small subtle truncate" style={{ maxWidth: 420 }}>— {ep.summary}</span>}
+                    {ep.summary && <span className="small subtle truncate" style={{ maxWidth: 380 }}>— {ep.summary}</span>}
+                  </div>
+                  <div className="meta">
+                    {ep.parameters.filter(p => p.source !== 'Service').map(p => (
+                      <span key={p.name} className="chip" title={`${p.type} · ${p.source === 'Route' ? 'in the path' : p.source === 'Query' ? 'in the query string' : p.source === 'Body' ? 'in the body' : 'in a header'}${p.optional ? ' · optional' : ''}`}>
+                        <span className="subtle">{p.source === 'Route' ? 'path' : p.source === 'Query' ? 'query' : p.source === 'Body' ? 'body' : 'header'}</span> {p.name}{p.optional ? '?' : ''}
+                      </span>
+                    ))}
+                    {ep.calls && <span className="chip" style={{ color: 'var(--accent-text)' }} title="Service operation it calls"><Icon name="zap" size={11} />{splitWords(ep.calls.split('.')[1])}</span>}
+                    <span className="chip" title="What it returns"><Icon name="arrowLeft" size={11} />{ep.returns}</span>
                   </div>
                 </div>
                 <div className="actions">
                   <Button size="sm" variant="ghost" iconOnly icon="send" title="Try it" onClick={e => { e.stopPropagation(); setSelected(ep.id); setDrawerTab('try') }} />
+                  <Button size="sm" variant="ghost" iconOnly icon="copy" title="Make a copy" onClick={e => { e.stopPropagation(); setEditor({ mode: 'add', templateId: ep.id }) }} />
                   <Button size="sm" variant="ghost" iconOnly icon="edit" title="Edit" onClick={e => { e.stopPropagation(); setEditor({ mode: 'edit', endpoint: ep }) }} />
                   <Button size="sm" variant="ghost" iconOnly icon="trash" title="Delete" onClick={e => { e.stopPropagation(); remove(ep) }} />
                 </div>
@@ -272,6 +285,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
           onClose={() => setSelected(null)}
           onEdit={() => setEditor({ mode: 'edit', endpoint: selectedEp })}
           onDelete={() => remove(selectedEp)}
+          onCopy={() => setEditor({ mode: 'add', templateId: selectedEp.id })}
           onStart={toggleRun}
         />
       )}

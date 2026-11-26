@@ -30,7 +30,9 @@ public record EndpointInfo(
     string Returns,
     bool RequiresAuth,
     string File,
-    int Line);
+    int Line,
+    string? Calls = null,
+    string? BodySample = null);
 
 public record EndpointGroup(string Key, string Name, EndpointStyle Style, string BaseRoute, string File, int EndpointCount);
 
@@ -47,7 +49,10 @@ public record EntityInfo(
     List<EntityProperty> Properties);
 
 public record ProjectRefInfo(string Name, string Path, string? Framework, string Role, bool IsWeb);
-public record ServiceInfo(string Interface, string? Implementation, string Project, int Methods);
+public record ServiceParam(string Name, string Type, string Friendly, bool Injected);
+public record ServiceOperation(string Name, List<ServiceParam> Parameters, string ReturnType, string Returns, bool IsAsync, bool Exposed);
+public record ServiceInfo(string Interface, string? Implementation, string Project, int Methods, string Namespace, List<ServiceOperation> Operations);
+public record DataAccessInfo(List<string> SqlProviders, List<string> ConnectionStrings);
 
 public record SolutionProjectInfo(string Name, string Path, string? Framework, string Role, bool IsWeb, List<string> References, int? EndpointCount, int FileCount);
 public record SolutionDetails(string Name, string Path, List<SolutionProjectInfo> Projects);
@@ -82,7 +87,8 @@ public record ProjectDetails(
     string? SolutionPath,
     List<ProjectRefInfo> ReferencedProjects,
     List<string> BinaryReferences,
-    List<ServiceInfo> Services);
+    List<ServiceInfo> Services,
+    DataAccessInfo DataAccess);
 
 // ---------- Endpoint editing ----------
 public static class Behaviors
@@ -97,6 +103,9 @@ public static class Behaviors
     public const string EntityUpdate = "entityUpdate";
     public const string EntityDelete = "entityDelete";
     public const string EntityFilter = "entityFilter";
+    public const string ServiceCall = "serviceCall";
+    public const string Sql = "sql";
+    public const string Template = "template";
 
     public static bool IsEntity(string b) => b.StartsWith("entity", StringComparison.Ordinal);
 }
@@ -115,7 +124,18 @@ public record AddEndpointRequest(
     string? Message,
     string? Entity,
     string? FilterProperty,
-    List<EndpointParam>? Parameters);
+    List<EndpointParam>? Parameters,
+    // Call a service operation / copy an existing endpoint
+    string? ServiceInterface = null,
+    string? ServiceOperation = null,
+    bool NewOperation = false,
+    string? TemplateEndpointId = null,
+    // Run SQL
+    string? Sql = null,
+    string? SqlKind = null,          // "query" or "procedure"
+    string? SqlProvider = null,
+    string? ConnectionName = null,
+    string? ConnectionString = null);  // only when adding a new connection string
 
 public record UpdateEndpointRequest(
     string HttpMethod,
