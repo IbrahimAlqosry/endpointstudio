@@ -4,6 +4,8 @@ import { BuildDialog } from '../components/BuildDialog'
 import { EndpointDrawer } from '../components/EndpointDrawer'
 import { EndpointEditor } from '../components/EndpointEditor'
 import { GitPanel } from '../components/GitPanel'
+import { FilesPanel } from '../components/FilesPanel'
+import { TerminalPanel } from '../components/TerminalPanel'
 import { usePaletteItems, type PaletteItem } from '../palette'
 import { DeployPanel } from '../components/DeployPanel'
 import { HealthDialog } from '../components/HealthDialog'
@@ -32,7 +34,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
   const [build, setBuild] = useState<BuildResult | 'loading' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
-  const [view, setView] = useState<'endpoints' | 'settings' | 'deploy' | 'git'>(() => (new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') as 'settings' | 'deploy' | 'git') || 'endpoints')
+  const [view, setView] = useState<'endpoints' | 'settings' | 'deploy' | 'git' | 'files' | 'terminal'>(() => (new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') as 'settings' | 'deploy' | 'git' | 'files' | 'terminal') || 'endpoints')
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [run, setRun] = useState<RunStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -125,13 +127,15 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
 
   const paletteItems = useMemo<PaletteItem[] | null>(() => {
     if (!project) return null
-    const tab = (v: 'endpoints' | 'settings' | 'deploy' | 'git', title: string, icon: string, keywords = '') =>
+    const tab = (v: 'endpoints' | 'settings' | 'deploy' | 'git' | 'files' | 'terminal', title: string, icon: string, keywords = '') =>
       ({ id: 'tab-' + v, group: project.name, title, icon, keywords, run: () => setView(v) })
     return [
       tab('endpoints', 'Endpoints', 'layers'),
       tab('settings', 'Settings', 'key', 'appsettings config connection strings'),
       tab('deploy', 'Publish & deploy', 'rocket', 'docker iis azure ftp ssh zip'),
       tab('git', 'Source control', 'history', 'git commit branch push pull'),
+      tab('files', 'Files', 'folder', 'edit code explorer'),
+      tab('terminal', 'Terminal', 'monitor', 'shell command powershell cmd'),
       { id: 'act-health', group: project.name, title: 'Health check', icon: 'checkCircle', keywords: 'security problems', run: () => setHealthOpen(true) },
       ...project.endpoints.map(e => ({
         id: 'ep-' + e.id, group: 'Endpoints', title: `${e.httpMethod} ${e.route}`, subtitle: e.summary ?? e.name, icon: 'send', keywords: e.name,
@@ -210,10 +214,14 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
         <button className={`tab${view === 'settings' ? ' active' : ''}`} onClick={() => setView('settings')}><span className="row gap-6"><Icon name="key" size={15} />Settings</span></button>
         <button className={`tab${view === 'deploy' ? ' active' : ''}`} onClick={() => setView('deploy')}><span className="row gap-6"><Icon name="rocket" size={15} />Publish &amp; deploy</span></button>
         <button className={`tab${view === 'git' ? ' active' : ''}`} onClick={() => setView('git')}><span className="row gap-6"><Icon name="history" size={15} />Source control</span></button>
+        <button className={`tab${view === 'files' ? ' active' : ''}`} onClick={() => setView('files')}><span className="row gap-6"><Icon name="folder" size={15} />Files</span></button>
+        <button className={`tab${view === 'terminal' ? ' active' : ''}`} onClick={() => setView('terminal')}><span className="row gap-6"><Icon name="monitor" size={15} />Terminal</span></button>
       </div>
 
       {view === 'settings' && <SettingsPanel path={path} onChanged={load} />}
       {view === 'git' && <GitPanel path={path} />}
+      {view === 'files' && <FilesPanel root={path} />}
+      {view === 'terminal' && <TerminalPanel root={path} kind="dotnet" />}
       {view === 'deploy' && <DeployPanel project={{ path: project.path, name: project.name, platform: project.capabilities.platform }} />}
       {view === 'endpoints' && <>
       <RunBar run={run} busy={busy} onToggle={toggleRun} onExport={exportPostman} canRun={project.capabilities.canRun} runNote={project.capabilities.runNote} framework={project.capabilities.platform === 'NetFramework'} />

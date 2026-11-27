@@ -48,20 +48,21 @@ public class HistoryService
         return last.Description;
     }
 
-    private void Commit(string projectPath, string description, List<(string Path, bool Existed, string? Content)> files)
+    private void Commit(string projectPath, string description, List<(string Path, bool Existed)> files)
     {
         var id = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N")[..6];
         var entryDir = Path.Combine(Dir(projectPath), id);
         Directory.CreateDirectory(entryDir);
         var stored = new List<StoredFile>();
         var i = 0;
-        foreach (var (path, existed, content) in files)
+        foreach (var (path, existed) in files)
         {
             string? backup = null;
-            if (existed && content is not null)
+            if (existed)
             {
+                // Byte-for-byte copy, so encodings and line endings come back exactly on undo
                 backup = $"{i++}.bak";
-                File.WriteAllText(Path.Combine(entryDir, backup), content);
+                File.Copy(path, Path.Combine(entryDir, backup), overwrite: true);
             }
             stored.Add(new StoredFile(path, existed, backup));
         }
@@ -96,28 +97,29 @@ public class HistoryService
     /// <summary>Collects file writes; nothing is written until <see cref="Commit"/>.</summary>
     public class ChangeSet(HistoryService owner, string projectPath, string description)
     {
-        private readonly Dictionary<string, string> _writes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, object> _writes = new(StringComparer.OrdinalIgnoreCase);
 
         public string Read(string path) =>
-            _writes.TryGetValue(path, out var pending) ? pending : File.ReadAllText(path);
+            _writes.TryGetValue(Path.GetFullPath(path), out var pending) ? pending as string ?? System.Text.Encoding.UTF8.GetString((byte[])pending) : File.ReadAllText(path);
 
-        public bool Exists(string path) => _writes.ContainsKey(path) || File.Exists(path);
+        public bool Exists(string path) => _writes.ContainsKey(Path.GetFullPath(path)) || File.Exists(path);
 
         public void Write(string path, string content) => _writes[Path.GetFullPath(path)] = content;
+
+        /// <summary>Writes exact bytes (used by the file editor to keep encodings).</summary>
+        public void WriteBytes(string path, byte[] content) => _writes[Path.GetFullPath(path)] = content;
 
         public IReadOnlyCollection<string> ChangedFiles => _writes.Keys;
 
         public void Commit()
         {
             if (_writes.Count == 0) return;
-            var originals = _writes.Keys
-                .Select(p => (p, File.Exists(p), File.Exists(p) ? File.ReadAllText(p) : null))
-                .ToList();
-            owner.Commit(projectPath, description, originals);
+            owner.Commit(projectPath, description, _writes.Keys.Select(p => (p, File.Exists(p))).ToList());
             foreach (var (path, content) in _writes)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path, content);
+                if (content is byte[] bytes) File.WriteAllBytes(path, bytes);
+                else File.WriteAllText(path, (string)content);
             }
         }
     }

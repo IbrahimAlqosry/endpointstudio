@@ -1,7 +1,7 @@
 import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
   DeployProfile, DeployRequest, FrontendDetails, InspectResult, RunStatus as FeRunStatus, DeployTools, GenerateProjectResult, HealthReport, JobStatus, SettingChange, SettingsInfo, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
-  ClientPlan, GitBranch, GitCommit, GitCommitDetails, GitDiff, GitStash, GitStatus,
+  ClientPlan, FileContent, FileSearchResult, ProjectFileItem, TerminalInfo, TerminalOutput, GitBranch, GitCommit, GitCommitDetails, GitDiff, GitStash, GitStatus,
   DbExtras, DbsGrant, RoutineDetails,
   DbRef, DbSchema, DdlChange, RowsResult, SavedConnection, SqlResult,
 } from './types'
@@ -164,4 +164,24 @@ export const api = {
   // Typed API client for front-end apps
   clientPreview: (path: string) => request<ClientPlan>('GET', `/api/frontend/client?${q(path)}`),
   clientGenerate: (path: string) => request<{ message: string }>('POST', '/api/frontend/client', { path }),
+
+  // Project files
+  filesList: (root: string, dir = '', hidden = false) => request<ProjectFileItem[]>('GET', `/api/files/list?root=${encodeURIComponent(root)}&dir=${encodeURIComponent(dir)}&hidden=${hidden}`),
+  fileRead: (root: string, path: string) => request<FileContent>('GET', `/api/files/read?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`),
+  fileRawUrl: (root: string, path: string) => `/api/files/raw?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`,
+  fileWrite: (root: string, path: string, text: string, expected?: string) => request<FileContent>('POST', '/api/files/write', { root, path, text, expected }),
+  fileCreate: (root: string, path: string, isDir: boolean, text = '') => request<ProjectFileItem>('POST', '/api/files/create', { root, path, isDir, text }),
+  fileRename: (root: string, path: string, newName: string) => request<ProjectFileItem>('POST', '/api/files/rename', { root, path, newName }),
+  fileDelete: (root: string, path: string) => request<{ message: string }>('POST', '/api/files/delete', { root, path }),
+  filesSearch: (root: string, q: string) => request<FileSearchResult>('GET', `/api/files/search?root=${encodeURIComponent(root)}&q=${encodeURIComponent(q)}`),
+  filesUndo: (root: string) => request<{ message: string }>('POST', '/api/files/undo', { path: root }),
+  filesHistory: (root: string) => request<{ id: string; time: string; description: string }[]>('GET', `/api/files/history?root=${encodeURIComponent(root)}`),
+
+  // Terminal
+  terminalShells: () => request<string[]>('GET', '/api/terminal/shells'),
+  terminalStart: (root: string, shell?: string, command?: string) => request<TerminalInfo>('POST', '/api/terminal/start', { root, shell, command }),
+  terminalOutput: (id: string, since: number) => request<TerminalOutput>('GET', `/api/terminal/${id}/output?since=${since}`),
+  terminalInput: (id: string, text: string) => request<void>('POST', `/api/terminal/${id}/input`, { text }),
+  terminalStop: (id: string) => request<void>('POST', `/api/terminal/${id}/stop`),
+  terminalClose: (id: string) => request<void>('DELETE', `/api/terminal/${id}`),
 }

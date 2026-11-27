@@ -576,3 +576,41 @@ kbd { display: inline-block; min-width: 18px; padding: 1px 5px; margin: 0 2px; b
 .sql-suggest-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border: none; background: none; border-radius: 6px; font: 12.5px var(--mono); color: var(--text); text-align: left; cursor: pointer; min-width: 0; }
 .sql-suggest-item.active { background: var(--accent-soft); color: var(--accent-text); }
 .sql-suggest-foot { padding: 4px 8px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
+
+/* ---------------------------------------------------------------- Files */
+.files { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 12px; height: calc(100vh - 230px); min-height: 520px; }
+.files-side { display: flex; flex-direction: column; overflow: hidden; }
+.files-tree { flex: 1; overflow: auto; padding: 4px 0; }
+.ft-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 13px; color: var(--text-2); cursor: pointer; min-width: 0; position: relative; }
+.ft-row:hover { background: var(--bg-hover); color: var(--text); }
+.ft-row.active { background: var(--accent-soft); color: var(--accent-text); }
+.ft-actions { display: none; gap: 2px; }
+.ft-row:hover .ft-actions { display: flex; }
+.ft-actions button { border: none; background: none; color: var(--text-3); padding: 2px 3px; cursor: pointer; border-radius: 4px; display: grid; }
+.ft-actions button:hover { background: var(--bg-sunken); color: var(--text); }
+.ft-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; flex-shrink: 0; }
+.files-main { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.ed-tabs, .term-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
+.ed-tab { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 10px; font-size: 12.5px; color: var(--text-3); border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; cursor: pointer; white-space: nowrap; }
+.ed-tab:hover { color: var(--text); }
+.ed-tab.active { background: var(--bg-elev); color: var(--text); border-color: var(--border); margin-bottom: -1px; }
+.ed-close { border: none; background: none; color: var(--text-3); cursor: pointer; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; padding: 0; }
+.ed-close:hover { background: var(--bg-sunken); color: var(--text); }
+.ed-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.ed-body { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.code-editor { height: 100%; }
+.code-editor .cm-editor { height: 100%; }
+.code-editor .cm-editor.cm-focused { outline: none; }
+.ed-status { display: flex; gap: 14px; padding: 4px 10px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.ed-image { height: 100%; display: grid; place-items: center; background: repeating-conic-gradient(var(--bg-sunken) 0% 25%, transparent 0% 50%) 50% / 20px 20px; overflow: auto; }
+.ed-image img { max-width: 95%; max-height: 95%; }
+
+/* ---------------------------------------------------------------- Terminal */
+.term { display: flex; flex-direction: column; height: calc(100vh - 230px); min-height: 460px; overflow: hidden; }
+.term-quick { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.term-quick .chip { cursor: pointer; height: 24px; }
+.term-quick .chip:hover { border-color: var(--accent); color: var(--accent-text); }
+.term-out { flex: 1; margin: 0; padding: 10px 14px; overflow: auto; background: #0d1117; color: #d1d7e0; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.term-input { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #0d1117; border-top: 1px solid #22272e; }
+.term-input input { flex: 1; background: none; border: none; outline: none; color: #e6edf3; font-size: 13px; }
+@media (max-width: 900px) { .files { grid-template-columns: 1fr; height: auto; } .files-side { max-height: 300px; } }

@@ -255,3 +255,10 @@ export interface DbExtras {
 }
 export interface RoutineParam { name: string; type: string; mode: string }
 export interface RoutineDetails { definition: string; editable: string; parameters: RoutineParam[]; returns: string | null }
+
+// ---------- Files & terminal ----------
+export interface ProjectFileItem { name: string; path: string; isDir: boolean; size: number; modified: string; children: number | null }
+export interface FileContent { path: string; text: string; binary: boolean; tooLarge: boolean; encoding: string; lineEnding: string; size: number; modified: string; readOnly: boolean }
+export interface FileSearchResult { files: string[]; hits: { path: string; line: number; text: string }[] }
+export interface TerminalInfo { id: string; shell: string; directory: string; running: boolean; exitCode: number | null }
+export interface TerminalOutput { chunks: string[]; next: number; running: boolean; exitCode: number | null }

@@ -30,6 +30,8 @@ builder.Services.AddSingleton<DecompileService>();
 builder.Services.AddSingleton<QosriStudio.Server.Services.Frontend.FrontendService>();
 builder.Services.AddSingleton<QosriStudio.Server.Services.Db.DbStudioService>();
 builder.Services.AddSingleton<GitService>();
+builder.Services.AddSingleton<ProjectFilesService>();
+builder.Services.AddSingleton<TerminalService>();
 
 var app = builder.Build();
 
@@ -233,6 +235,35 @@ api.MapGet("/frontend/health", (string path, FrontendService fe) => fe.Health(pa
 
 
 
+
+// ---------------------------------------------------------------- Project files
+var files = api.MapGroup("/files");
+files.MapGet("/list", (string root, string? dir, bool? hidden, ProjectFilesService f) => f.List(root, dir, hidden ?? false));
+files.MapGet("/read", (string root, string path, ProjectFilesService f) => f.Read(root, path));
+files.MapGet("/raw", (string root, string path) =>
+{
+    var full = Path.GetFullPath(Path.Combine(ProjectFilesService.RootOf(root), path));
+    if (!full.StartsWith(ProjectFilesService.RootOf(root), StringComparison.OrdinalIgnoreCase) || !File.Exists(full)) return Results.NotFound();
+    var type = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider().TryGetContentType(full, out var t) ? t : "application/octet-stream";
+    return Results.File(full, type);
+});
+files.MapPost("/write", (FileWriteBody b, ProjectFilesService f) => f.Write(b));
+files.MapPost("/create", (FileCreateBody b, ProjectFilesService f) => f.Create(b));
+files.MapPost("/rename", (FileRenameBody b, ProjectFilesService f) => f.Rename(b));
+files.MapPost("/delete", (FileDeleteBody b, ProjectFilesService f) => new { message = f.Delete(b) });
+files.MapGet("/search", (string root, string q, bool? content, ProjectFilesService f) => f.Search(root, q, content ?? true));
+files.MapGet("/history", (string root, HistoryService h) => h.GetEntries(root));
+files.MapPost("/undo", (PathBody b, HistoryService h) => new { message = "Undone: " + h.UndoLast(b.Path) });
+
+// ---------------------------------------------------------------- Terminal
+var term = api.MapGroup("/terminal");
+term.MapGet("/shells", () => TerminalService.Shells());
+term.MapPost("/start", (TerminalStartBody b, TerminalService t) => t.Start(b));
+term.MapGet("/{id}/output", (string id, long? since, TerminalService t) => t.Output(id, since ?? 0));
+term.MapPost("/{id}/input", (string id, TerminalInputBody b, TerminalService t) => { t.Input(id, b.Text); return Results.Ok(); });
+term.MapPost("/{id}/stop", (string id, TerminalService t) => { t.Stop(id); return Results.Ok(); });
+term.MapDelete("/{id}", (string id, TerminalService t) => { t.Close(id); return Results.Ok(); });
+
 // ---------------------------------------------------------------- Source control (Git)
 var git = api.MapGroup("/git");
 git.MapGet("/status", (string path, GitService g) => g.Status(path));
@@ -329,6 +360,7 @@ app.Lifetime.ApplicationStopping.Register(() =>
 {
     app.Services.GetRequiredService<DotnetService>().Dispose();
     app.Services.GetRequiredService<FrontendService>().StopAll();
+    app.Services.GetRequiredService<TerminalService>().CloseAll();
 });
 
 app.Logger.LogInformation("QosriStudio server ready.");
