@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public record GitFile(string Path, string? OldPath, string Staged, string Unstaged, bool Untracked, bool Conflicted, bool InProject);
 public record GitStatus(bool Installed, bool IsRepo, string? Root, string ProjectDir, string? Branch, string? Upstream, int Ahead, int Behind, bool Detached,
@@ -224,7 +224,7 @@ public partial class GitService(JobService jobs)
         {
             var existing = File.ReadAllText(file);
             var missing = DefaultIgnore.Split('\n').Where(l => l.Trim().Length > 0 && !l.StartsWith('#') && !existing.Contains(l.Trim())).ToList();
-            if (missing.Count > 0) File.AppendAllText(file, "\n# Added by Stackwright\n" + string.Join("\n", missing) + "\n");
+            if (missing.Count > 0) File.AppendAllText(file, "\n# Added by QosriStudio\n" + string.Join("\n", missing) + "\n");
         }
         else File.WriteAllText(file, DefaultIgnore);
     }

@@ -1,6 +1,6 @@
 using System.Xml.Linq;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 /// <summary>
 /// Reads MSBuild properties the way most real solutions define them: in the project file itself, or in a

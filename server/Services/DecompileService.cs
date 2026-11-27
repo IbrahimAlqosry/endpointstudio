@@ -1,12 +1,12 @@
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text.RegularExpressions;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 using ICSharpCode.Decompiler;
 using ICSharpCode.Decompiler.CSharp.ProjectDecompiler;
 using ICSharpCode.Decompiler.Metadata;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public record AssemblyEntry(string Name, string Path, string? Version, string? Framework, bool IsOwnCode, bool IsMainApp, int Controllers, int Types, long Size, bool Obfuscated = false);
 public record InspectResult(string Folder, List<AssemblyEntry> Assemblies, string? MainApp);

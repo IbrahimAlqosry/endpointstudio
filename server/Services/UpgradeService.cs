@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public record UpgradeStep(string Project, string Kind, string Title, string Detail);
 public record UpgradePlan(string From, string To, int TargetMajor, List<UpgradeStep> Steps, List<string> Warnings, bool CanApply, List<string> Projects);

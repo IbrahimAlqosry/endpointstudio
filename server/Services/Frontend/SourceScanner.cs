@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Stackwright.Server.Services.Frontend;
+namespace QosriStudio.Server.Services.Frontend;
 
 /// <summary>
 /// Small, forgiving helpers for reading TypeScript/JavaScript without a full parser:

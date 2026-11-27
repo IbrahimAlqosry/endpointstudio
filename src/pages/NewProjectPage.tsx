@@ -147,7 +147,7 @@ export function NewProjectPage() {
     <div className="page" style={{ maxWidth: 980 }}>
       <div className="crumbs"><a href={href({ page: 'home' })}>Home</a><Icon name="chevronRight" size={12} /><span>New project</span></div>
       <h1 className="page-title" style={{ marginBottom: 6 }}>Create an API from a database</h1>
-      <p className="muted" style={{ marginBottom: 22 }}>Pick the tables you want and Stackwright creates a complete, ready-to-run ASP.NET Core project with endpoints to read and change your data.</p>
+      <p className="muted" style={{ marginBottom: 22 }}>Pick the tables you want and QosriStudio creates a complete, ready-to-run ASP.NET Core project with endpoints to read and change your data.</p>
 
       <div className="stepper">
         {steps.map((s, i) => (

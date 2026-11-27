@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 /// <summary>Reads a whole solution: its projects, what each one is for, how they depend on each other, and their endpoints.</summary>
 public static class SolutionService

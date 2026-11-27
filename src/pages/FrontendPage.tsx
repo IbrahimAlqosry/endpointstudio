@@ -8,9 +8,9 @@ import { HistoryDialog } from '../components/HistoryDialog'
 import { Icon } from '../components/Icon'
 import { JobView } from '../components/JobView'
 import { SettingsPanel } from '../components/SettingsPanel'
-import { Alert, Button, Empty, MethodBadge, Spinner, errorText, useToast } from '../components/ui'
+import { Alert, Button, Empty, MethodBadge, Modal, Spinner, errorText, useToast } from '../components/ui'
 import { href, navigate } from '../router'
-import type { FrontendApiCall, FrontendDetails, RunStatus } from '../types'
+import type { ClientPlan, FrontendApiCall, FrontendDetails, RunStatus } from '../types'
 
 type Tab = 'calls' | 'pages' | 'components' | 'settings' | 'deploy' | 'git'
 
@@ -29,6 +29,7 @@ export function FrontendPage({ path, onChanged }: { path: string; onChanged: () 
   const [app, setApp] = useState<FrontendDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('calls')
+  const [clientOpen, setClientOpen] = useState(false)
   const [run, setRun] = useState<RunStatus | null>(null)
   const [job, setJob] = useState<string | null>(null)
   const [healthOpen, setHealthOpen] = useState(false)
@@ -132,6 +133,7 @@ export function FrontendPage({ path, onChanged }: { path: string; onChanged: () 
               <div className="strong">Talks to {app.linkedBackendName}</div>
               <div className="small subtle">{counts.matched} of {app.apiCalls.length} calls reach a real endpoint{counts.problems > 0 ? `, ${counts.problems} need attention` : ''} · {app.unusedEndpoints.length} endpoints aren't used by this app</div>
             </div>
+            <Button size="sm" variant="primary" icon="sparkles" onClick={() => setClientOpen(true)}>Generate API client</Button>
             <Button size="sm" icon="arrowRight" onClick={() => navigate({ page: 'project', path: app.linkedBackend! })}>Open API project</Button>
             <Button size="sm" variant="ghost" onClick={() => setPicker(true)}>Change</Button>
             <Button size="sm" variant="ghost" onClick={() => link(null)}>Disconnect</Button>
@@ -142,7 +144,7 @@ export function FrontendPage({ path, onChanged }: { path: string; onChanged: () 
               <div className="group-icon"><Icon name="server" size={16} /></div>
               <div className="grow">
                 <div className="strong">Connect this app to its .NET API</div>
-                <div className="small subtle">Stackwright then checks that every one of the {app.apiCalls.length} API calls reaches a real endpoint.</div>
+                <div className="small subtle">QosriStudio then checks that every one of the {app.apiCalls.length} API calls reaches a real endpoint.</div>
               </div>
               <Button size="sm" icon="folderOpen" onClick={() => setPicker(true)}>Choose API project…</Button>
             </div>
@@ -179,6 +181,7 @@ export function FrontendPage({ path, onChanged }: { path: string; onChanged: () 
       {tab === 'deploy' && <DeployPanel project={{ path: app.path, name: app.name, platform: 'Frontend', frontend: true }} />}
 
       {picker && <FolderPicker mode="project" onPick={p => { if (p.toLowerCase().endsWith('.csproj')) link(p); else toast.error('Pick the .NET API project (.csproj).') }} onClose={() => setPicker(false)} />}
+      {clientOpen && <ClientDialog path={path} apiName={app.linkedBackendName ?? 'API'} onClose={() => setClientOpen(false)} onDone={() => { setClientOpen(false); load() }} />}
       {healthOpen && <HealthDialog frontend path={path} onClose={() => setHealthOpen(false)} onOpenEndpoint={() => {}} onUpgrade={() => {}} />}
       {historyOpen && <HistoryDialog history={app.history} onClose={() => setHistoryOpen(false)} onUndo={async () => {
         try { const r = await api.frontendUndo(path); setApp(r.project); toast.info(r.message) } catch (e) { toast.error(errorText(e)) }
@@ -322,4 +325,45 @@ function ComponentsTab({ app }: { app: FrontendDetails }) {
 function joinPath(dir: string, rel: string) {
   const sep = dir.includes('\\') ? '\\' : '/'
   return dir.replace(/[\\/]+$/, '') + sep + rel.replace(/\//g, sep)
+}
+
+function ClientDialog({ path, apiName, onClose, onDone }: { path: string; apiName: string; onClose: () => void; onDone: () => void }) {
+  const toast = useToast()
+  const [plan, setPlan] = useState<ClientPlan | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api.clientPreview(path).then(setPlan).catch(e => setError(errorText(e))) }, [path])
+  const generate = async () => {
+    setBusy(true)
+    try { const r = await api.clientGenerate(path); toast.success(r.message, { label: 'Undo', onClick: () => api.frontendUndo(path).then(x => toast.info(x.message)).catch(() => {}) }); onDone() }
+    catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Modal title="Generate the API client" subtitle={`Typed functions for every endpoint of ${apiName}, with the request and response shapes taken from its C# classes.`} icon="sparkles" onClose={onClose}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" icon="sparkles" loading={busy} disabled={!plan} onClick={generate}>{plan?.files.some(f => f.exists && !f.kept) ? 'Update the client' : 'Generate'}</Button></>}>
+      <div className="col gap-14">
+        {error && <Alert kind="error">{error}</Alert>}
+        {!plan && !error && <div className="row small subtle"><Spinner /> Reading the API…</div>}
+        {plan && (
+          <>
+            <div className="stats" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginBottom: 0 }}>
+              <div className="card stat"><div className="stat-value">{plan.operations}</div><div className="stat-label">Endpoints</div></div>
+              <div className="card stat"><div className="stat-value">{plan.types}</div><div className="stat-label">Types</div></div>
+            </div>
+            <div className="small"><span className="badge accent">{plan.style}</span></div>
+            <div className="col gap-4">
+              {plan.files.map(f => (
+                <div key={f.path} className="row gap-6 small">
+                  <Icon name="fileText" size={14} /><span className="mono grow">{f.path}</span>
+                  <span className={`badge ${f.kept ? '' : f.exists ? 'warning' : 'success'}`}>{f.kept ? 'kept (yours)' : f.exists ? 'replaced' : 'new'}</span>
+                </div>
+              ))}
+            </div>
+            <Alert kind="info">{plan.usage}</Alert>
+            <div className="tiny subtle">Generate again whenever the API changes. You can undo this from History.</div>
+          </>
+        )}
+      </div>
+    </Modal>
+  )
 }

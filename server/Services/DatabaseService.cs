@@ -1,13 +1,13 @@
 using System.Data.Common;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
-using DbColumn = Stackwright.Server.Models.DbColumn;
+using DbColumn = QosriStudio.Server.Models.DbColumn;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 /// <summary>Reads database structure (databases/schemas, tables, columns) from SQL Server, PostgreSQL, MySQL, Oracle and SQLite.</summary>
 public class DatabaseService

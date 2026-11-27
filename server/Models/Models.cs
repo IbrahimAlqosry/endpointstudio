@@ -1,4 +1,4 @@
-namespace Stackwright.Server.Models;
+namespace QosriStudio.Server.Models;
 
 // ---------- File system ----------
 public record DriveEntry(string Name, string Path, string? Label);

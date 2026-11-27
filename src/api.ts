@@ -1,7 +1,7 @@
 import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
   DeployProfile, DeployRequest, FrontendDetails, InspectResult, RunStatus as FeRunStatus, DeployTools, GenerateProjectResult, HealthReport, JobStatus, SettingChange, SettingsInfo, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
-  GitBranch, GitCommit, GitCommitDetails, GitDiff, GitStash, GitStatus,
+  ClientPlan, GitBranch, GitCommit, GitCommitDetails, GitDiff, GitStash, GitStatus,
   DbRef, DbSchema, DdlChange, RowsResult, SavedConnection, SqlResult,
 } from './types'
 
@@ -16,7 +16,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
-    throw new ApiError('Stackwright’s helper service isn’t running. Start it with “npm run dev” and try again.')
+    throw new ApiError('QosriStudio’s helper service isn’t running. Start it with “npm run dev” and try again.')
   }
   const text = await res.text()
   let data: unknown = null
@@ -24,7 +24,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   if (!res.ok) {
     const msg = (data as { error?: string } | null)?.error
     throw new ApiError(msg ?? (res.status === 502 || res.status === 504
-      ? 'Stackwright’s helper service isn’t running. Start it with “npm run dev” and try again.'
+      ? 'QosriStudio’s helper service isn’t running. Start it with “npm run dev” and try again.'
       : `Request failed (${res.status}).`))
   }
   return data as T
@@ -84,6 +84,7 @@ export const api = {
   run: (path: string) => request<RunStatus>('POST', `/api/project/run?${q(path)}`),
   stop: (path: string) => request<RunStatus>('POST', `/api/project/stop?${q(path)}`),
   tryEndpoint: (path: string, req: TryRequest) => request<TryResponse>('POST', `/api/project/try?${q(path)}`, req),
+  openApiUrl: (path: string, server?: string | null) => `/api/project/openapi?${q(path)}${server ? `&server=${encodeURIComponent(server)}` : ''}`,
   postmanUrl: (path: string, baseUrl?: string | null) => `/api/project/postman?${q(path)}${baseUrl ? `&baseUrl=${encodeURIComponent(baseUrl)}` : ''}`,
 
   dbConnect: (info: DbConnectionInfo) => request<{ version: string; databases: string[] }>('POST', '/api/db/connect', info),
@@ -146,4 +147,8 @@ export const api = {
   gitPull: (path: string) => request<{ jobId: string }>('POST', '/api/git/pull', { path }),
   gitPush: (path: string) => request<{ jobId: string }>('POST', '/api/git/push', { path }),
   gitClone: (url: string, folder: string) => request<{ jobId: string }>('POST', '/api/git/clone', { url, folder }),
+
+  // Typed API client for front-end apps
+  clientPreview: (path: string) => request<ClientPlan>('GET', `/api/frontend/client?${q(path)}`),
+  clientGenerate: (path: string) => request<{ message: string }>('POST', '/api/frontend/client', { path }),
 }

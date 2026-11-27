@@ -2,14 +2,14 @@ using System.Data.Common;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public record SqlTestRequest(string Provider, string? ConnectionName, string? ConnectionString, string Sql, Dictionary<string, string?>? Values);
 public record SqlTestResult(List<string> Columns, List<List<string?>> Rows, bool More, long DurationMs);

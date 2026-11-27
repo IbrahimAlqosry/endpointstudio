@@ -1,11 +1,11 @@
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
-namespace Stackwright.Server.Services.Frontend;
+namespace QosriStudio.Server.Services.Frontend;
 
 public record FrontendRoute(string Path, string? Component, string Kind, List<string> Guards, string File, int Line);
 public record FrontendComponent(string Name, string Kind, string? Selector, string File, int Line);

@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public record HealthFinding(string Severity, string Category, string Title, string Detail, List<string> Items, List<string>? EndpointIds = null);
 public record HealthReport(int Score, string Grade, List<HealthFinding> Findings, int Checks);

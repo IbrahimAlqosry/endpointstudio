@@ -238,3 +238,6 @@ export interface GitCommitDetails { commit: GitCommit; body: string; files: GitC
 export interface GitBranch { name: string; short: string; remote: boolean; current: boolean; upstream: string | null; track: string | null; date: string | null }
 export interface GitStash { ref: string; message: string; date: string | null }
 export interface GitDiff { file: string; text: string; binary: boolean; tooLarge: boolean }
+
+// ---------- Typed API client ----------
+export interface ClientPlan { folder: string; style: string; operations: number; types: number; files: { path: string; exists: boolean; kept: boolean }[]; usage: string }

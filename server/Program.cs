@@ -1,11 +1,11 @@
-using Stackwright.Server.Services.Db;
+using QosriStudio.Server.Services.Db;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Serialization;
-using Stackwright.Server.Codegen;
-using Stackwright.Server.Models;
-using Stackwright.Server.Services;
-using Stackwright.Server.Services.Frontend;
+using QosriStudio.Server.Codegen;
+using QosriStudio.Server.Models;
+using QosriStudio.Server.Services;
+using QosriStudio.Server.Services.Frontend;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(builder.Configuration["urls"] ?? "http://localhost:5199");
@@ -27,8 +27,8 @@ builder.Services.AddSingleton<JobService>();
 builder.Services.AddSingleton<SettingsService>();
 builder.Services.AddSingleton<DeployService>();
 builder.Services.AddSingleton<DecompileService>();
-builder.Services.AddSingleton<Stackwright.Server.Services.Frontend.FrontendService>();
-builder.Services.AddSingleton<Stackwright.Server.Services.Db.DbStudioService>();
+builder.Services.AddSingleton<QosriStudio.Server.Services.Frontend.FrontendService>();
+builder.Services.AddSingleton<QosriStudio.Server.Services.Db.DbStudioService>();
 builder.Services.AddSingleton<GitService>();
 
 var app = builder.Build();
@@ -221,6 +221,14 @@ api.MapPost("/frontend/undo", (string path, FrontendService fe, HistoryService h
     var what = history.UndoLast(FrontendService.NormalizePath(path));
     return new { message = $"Undone: {what}", project = fe.Details(path) };
 });
+api.MapGet("/frontend/client", (string path, FrontendService fe) => fe.PreviewClient(path));
+api.MapPost("/frontend/client", (PathBody b, FrontendService fe) => new { message = fe.GenerateClient(b.Path) });
+api.MapGet("/project/openapi", (string path, string? server) =>
+{
+    var model = ProjectAnalyzer.Analyze(path);
+    var json = QosriStudio.Server.Services.Contracts.OpenApiExporter.Export(QosriStudio.Server.Services.Contracts.ApiContract.From(model), server);
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(json), "application/json", $"{model.Name}.openapi.json");
+});
 api.MapGet("/frontend/health", (string path, FrontendService fe) => fe.Health(path));
 
 
@@ -311,7 +319,7 @@ app.Lifetime.ApplicationStopping.Register(() =>
     app.Services.GetRequiredService<FrontendService>().StopAll();
 });
 
-app.Logger.LogInformation("Stackwright server ready.");
+app.Logger.LogInformation("QosriStudio server ready.");
 app.Run();
 
 static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService history, DotnetService dotnet) => new(

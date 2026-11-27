@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 /// <summary>Location for the studio's own data (recent projects, change history).</summary>
 public static class AppStorage
@@ -11,17 +11,20 @@ public static class AppStorage
     public static readonly string Root = ResolveRoot();
 
     /// <summary>
-    /// %LOCALAPPDATA%\Stackwright. The app used to be called Endpoint Studio; its folder (recent list, history,
-    /// saved publish options) is moved over the first time so nothing is lost.
+    /// %LOCALAPPDATA%\QosriStudio. The app used to be called Stackwright and, before that, Endpoint Studio; the newest
+    /// old folder (recent list, history, saved connections, publish options) is moved over the first time so nothing is lost.
     /// </summary>
     private static string ResolveRoot()
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var root = Path.Combine(local, "Stackwright");
-        var old = Path.Combine(local, "EndpointStudio");
+        var root = Path.Combine(local, "QosriStudio");
         try
         {
-            if (!Directory.Exists(root) && Directory.Exists(old)) Directory.Move(old, root);
+            if (!Directory.Exists(root))
+            {
+                var old = new[] { "Stackwright", "EndpointStudio" }.Select(n => Path.Combine(local, n)).FirstOrDefault(Directory.Exists);
+                if (old is not null) Directory.Move(old, root);
+            }
         }
         catch { /* the old folder stays where it is; a fresh one is used */ }
         return root;

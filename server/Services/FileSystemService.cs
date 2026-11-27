@@ -1,9 +1,9 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using Stackwright.Server.Models;
-using Stackwright.Server.Services.Frontend;
+using QosriStudio.Server.Models;
+using QosriStudio.Server.Services.Frontend;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public class FileSystemService
 {

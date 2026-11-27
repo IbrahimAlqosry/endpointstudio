@@ -1,8 +1,8 @@
 using System.Data.Common;
 using Oracle.ManagedDataAccess.Client;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services.Db;
+namespace QosriStudio.Server.Services.Db;
 
 /// <summary>Reads a database's full design (tables, columns, keys, relations, indexes, views, routines) from its catalog.</summary>
 public static class SchemaReader

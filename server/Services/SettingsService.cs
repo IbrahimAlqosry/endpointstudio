@@ -1,10 +1,10 @@
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public record SettingEntry(string Key, string? Value, string Kind, bool Secret);
 public record SettingsFile(string Name, string Path, string Format, string? Environment, bool HasComments, List<SettingEntry> Entries);

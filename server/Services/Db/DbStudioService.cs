@@ -6,9 +6,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Oracle.ManagedDataAccess.Client;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services.Db;
+namespace QosriStudio.Server.Services.Db;
 
 /// <summary>Database Studio: browse a database's design, its data, and change both.</summary>
 public partial class DbStudioService(DatabaseService db)

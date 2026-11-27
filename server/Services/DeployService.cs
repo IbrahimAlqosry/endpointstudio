@@ -1,12 +1,12 @@
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Stackwright.Server.Services.Frontend;
+using QosriStudio.Server.Services.Frontend;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public record DeployRequest(
     string Target,                       // folder | zip | docker | dockerRemote | ssh | webdeploy | azure | ftp
@@ -156,7 +156,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
         var name = isFrontend ? Path.GetFileName(Path.GetDirectoryName(csproj)!) : Path.GetFileNameWithoutExtension(csproj);
         var (platform, major, legacy) = isFrontend ? (ProjectPlatform.NetCore, 0, false) : ProjectAnalyzer.Peek(csproj);
         var framework = platform == ProjectPlatform.NetFramework || legacy;
-        var temp = Path.Combine(Path.GetTempPath(), "Stackwright", "publish", $"{name}-{DateTime.Now:yyyyMMdd-HHmmss}");
+        var temp = Path.Combine(Path.GetTempPath(), "QosriStudio", "publish", $"{name}-{DateTime.Now:yyyyMMdd-HHmmss}");
 
         switch (r.Target)
         {
@@ -180,7 +180,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
             case "docker":
             case "dockerRemote":
             {
-                if (framework) throw new StudioException(".NET Framework apps need Windows containers, which Stackwright can't build. Publish to a folder or IIS instead.");
+                if (framework) throw new StudioException(".NET Framework apps need Windows containers, which QosriStudio can't build. Publish to a folder or IIS instead.");
                 var docker = FindOnPath("docker") ?? throw new StudioException("Docker isn't installed. Install Docker Desktop and try again.");
                 var image = isFrontend ? await BuildFrontendImageAsync(ctx, docker, csproj, r) : await BuildImageAsync(ctx, docker, csproj, r, major);
                 var port = isFrontend ? 80 : 8080;
@@ -367,7 +367,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
             _ => ("mcr.microsoft.com/dotnet/sdk:10.0", "mcr.microsoft.com/dotnet/aspnet:10.0"),
         };
         return $"""
-            # Created by Stackwright. Build from the solution folder:
+            # Created by QosriStudio. Build from the solution folder:
             #   docker build -f {rel.Replace(Path.GetFileName(csproj), "Dockerfile")} -t {assembly.ToLowerInvariant()} .
             FROM {sdk} AS build
             WORKDIR /src
@@ -441,7 +441,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
         };
         var output = (m.OutputDir ?? "dist").Replace('\\', '/').TrimEnd('/');
         return $"""
-            # Created by Stackwright: builds the app with Node, then serves it with nginx
+            # Created by QosriStudio: builds the app with Node, then serves it with nginx
             FROM node:{node}-alpine AS build
             WORKDIR /app
             COPY package*.json yarn.lock* pnpm-lock.yaml* ./
@@ -493,7 +493,7 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
     private static async Task<string> DockerRemoteAsync(JobService.Context ctx, string docker, string image, DeployRequest r, int containerPort = 8080)
     {
         var host = $"ssh://{r.User}@{r.Host}" + (r.Port is > 0 and not 22 ? $":{r.Port}" : "");
-        var tar = Path.Combine(Path.GetTempPath(), "Stackwright", $"{image.Replace(':', '-').Replace('/', '-')}.tar");
+        var tar = Path.Combine(Path.GetTempPath(), "QosriStudio", $"{image.Replace(':', '-').Replace('/', '-')}.tar");
         Directory.CreateDirectory(Path.GetDirectoryName(tar)!);
         ctx.Log("Saving the image to send it to the server…");
         if (await JobService.RunAsync(ctx, docker, ["save", "-o", tar, image], Path.GetTempPath()) != 0) throw new StudioException("The image couldn't be saved.");

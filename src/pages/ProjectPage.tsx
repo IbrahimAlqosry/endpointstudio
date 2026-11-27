@@ -4,6 +4,7 @@ import { BuildDialog } from '../components/BuildDialog'
 import { EndpointDrawer } from '../components/EndpointDrawer'
 import { EndpointEditor } from '../components/EndpointEditor'
 import { GitPanel } from '../components/GitPanel'
+import { usePaletteItems, type PaletteItem } from '../palette'
 import { DeployPanel } from '../components/DeployPanel'
 import { HealthDialog } from '../components/HealthDialog'
 import { SettingsPanel } from '../components/SettingsPanel'
@@ -104,12 +105,14 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
     } catch (e) { toast.error(errorText(e)) } finally { setBusy(false) }
   }
 
-  const exportPostman = () => {
+  const exportPostman = (kind: 'postman' | 'openapi') => {
     const a = document.createElement('a')
-    a.href = api.postmanUrl(path, run?.running ? run.url : null)
+    a.href = kind === 'postman' ? api.postmanUrl(path, run?.running ? run.url : null) : api.openApiUrl(path, run?.running ? run.url : null)
     a.download = ''
     document.body.appendChild(a); a.click(); a.remove()
-    toast.success('Postman collection downloaded. Import it into Postman to share or test your API.')
+    toast.success(kind === 'postman'
+      ? 'Postman collection downloaded. Import it into Postman to share or test your API.'
+      : 'OpenAPI document downloaded. Use it with Swagger, API gateways, client generators or Postman.')
   }
 
   const filtered = useMemo(() => {
@@ -119,6 +122,24 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
       (!methodFilter || e.httpMethod === methodFilter) &&
       (!s || e.route.toLowerCase().includes(s) || e.name.toLowerCase().includes(s) || (e.summary ?? '').toLowerCase().includes(s)))
   }, [project, search, methodFilter])
+
+  const paletteItems = useMemo<PaletteItem[] | null>(() => {
+    if (!project) return null
+    const tab = (v: 'endpoints' | 'settings' | 'deploy' | 'git', title: string, icon: string, keywords = '') =>
+      ({ id: 'tab-' + v, group: project.name, title, icon, keywords, run: () => setView(v) })
+    return [
+      tab('endpoints', 'Endpoints', 'layers'),
+      tab('settings', 'Settings', 'key', 'appsettings config connection strings'),
+      tab('deploy', 'Publish & deploy', 'rocket', 'docker iis azure ftp ssh zip'),
+      tab('git', 'Source control', 'history', 'git commit branch push pull'),
+      { id: 'act-health', group: project.name, title: 'Health check', icon: 'checkCircle', keywords: 'security problems', run: () => setHealthOpen(true) },
+      ...project.endpoints.map(e => ({
+        id: 'ep-' + e.id, group: 'Endpoints', title: `${e.httpMethod} ${e.route}`, subtitle: e.summary ?? e.name, icon: 'send', keywords: e.name,
+        run: () => { setView('endpoints'); setSelected(e.id); setDrawerTab('overview') },
+      })),
+    ]
+  }, [project])
+  usePaletteItems('project', paletteItems)
 
   if (loadError) {
     return (
@@ -230,7 +251,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
       {project.endpoints.length === 0 ? (
         <div className="card">
           <Empty icon="layers" title="No endpoints yet" action={<Button variant="primary" icon="plus" onClick={() => setEditor({ mode: 'add' })}>Add your first endpoint</Button>}>
-            This project doesn’t have any endpoints. Add one and Stackwright will write it into the project for you.
+            This project doesn’t have any endpoints. Add one and QosriStudio will write it into the project for you.
           </Empty>
         </div>
       ) : groups.length === 0 ? (
@@ -397,7 +418,7 @@ function fileName(p: string) {
 }
 
 function RunBar({ run, busy, onToggle, onExport, canRun, runNote, framework }: {
-  run: RunStatus | null; busy: boolean; onToggle: () => void; onExport: () => void; canRun: boolean; runNote: string | null; framework: boolean
+  run: RunStatus | null; busy: boolean; onToggle: () => void; onExport: (kind: 'postman' | 'openapi') => void; canRun: boolean; runNote: string | null; framework: boolean
 }) {
   const [showLog, setShowLog] = useState(false)
   const state = run?.state ?? 'stopped'
@@ -416,7 +437,7 @@ function RunBar({ run, busy, onToggle, onExport, canRun, runNote, framework }: {
           </div>
         </div>
         {run && run.log.length > 1 && <Button size="sm" variant="ghost" icon="fileText" onClick={() => setShowLog(s => !s)}>{showLog ? 'Hide output' : 'Show output'}</Button>}
-        <Button size="sm" icon="download" onClick={onExport}>Export to Postman</Button>
+        <ExportMenu onPick={onExport} />
         <Button size="sm" variant={run?.running ? 'default' : 'success'} icon={run?.running ? 'stop' : 'play'} loading={busy || state === 'starting'} onClick={onToggle} disabled={!run?.running && !canRun} title={!canRun ? runNote ?? undefined : undefined}>
           {run?.running ? 'Stop' : 'Run'}
         </Button>
@@ -428,4 +449,22 @@ function RunBar({ run, busy, onToggle, onExport, canRun, runNote, framework }: {
 
 function splitWords(s: string) {
   return s.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+}
+
+function ExportMenu({ onPick }: { onPick: (kind: 'postman' | 'openapi') => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ position: 'relative' }}>
+      <Button size="sm" icon="download" onClick={() => setOpen(o => !o)}>Export</Button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onClick={() => setOpen(false)} />
+          <div className="menu" style={{ right: 0, width: 260 }}>
+            <button className="menu-item" onClick={() => { setOpen(false); onPick('openapi') }}><div className="strong">OpenAPI document</div><div className="tiny subtle">For Swagger, gateways and client generators</div></button>
+            <button className="menu-item" onClick={() => { setOpen(false); onPick('postman') }}><div className="strong">Postman collection</div><div className="tiny subtle">Every endpoint with example bodies</div></button>
+          </div>
+        </>
+      )}
+    </div>
+  )
 }

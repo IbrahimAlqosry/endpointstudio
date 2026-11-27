@@ -1,8 +1,8 @@
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 public record JobStatus(string Id, string Kind, string Title, string State, List<string> Log, string? Result, string? ResultUrl, DateTime Started, DateTime? Finished);
 

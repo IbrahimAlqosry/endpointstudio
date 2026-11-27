@@ -1,6 +1,6 @@
-# Stackwright
+# QosriStudio
 
-A visual, no-code studio for **.NET Web APIs** (from **.NET Framework 4.x** to **.NET 11**), the **Angular, React, Next.js and Vue** apps that call them, and the **databases** behind them. Open any project to browse, add, edit and delete its endpoints, turn a database into a ready-to-run Clean Architecture API with JWT sign-in, design and edit databases visually, and manage the code with Git. Users only ever see forms, lists and buttons.
+**QosriStudio** is a visual, no-code studio for **.NET Web APIs** (from **.NET Framework 4.x** to **.NET 11**), the **Angular, React, Next.js and Vue** apps that call them, and the **databases** behind them. Open any project to browse, add, edit and delete its endpoints, turn a database into a ready-to-run Clean Architecture API with JWT sign-in, design and edit databases visually, and manage the code with Git. Users only ever see forms, lists and buttons.
 
 ## Features
 
@@ -20,6 +20,9 @@ A visual, no-code studio for **.NET Web APIs** (from **.NET Framework 4.x** to *
 | **New from database** | A four-step wizard: connect (**SQL Server, PostgreSQL, MySQL, Oracle or SQLite**) → pick a database or schema → pick tables and operations → settings. By default it generates a **Clean Architecture** solution (Domain, Application, Infrastructure, Api) with **JWT sign-in**: entities, EF Core configurations, a repository, services and DTOs with validation, Controllers or Minimal APIs, a login endpoint, hashed passwords and API docs that accept the token. The admin password is shown once. A single-project layout is still available. A build check runs at the end |
 | **Database Studio** | Saved connections (passwords encrypted for your Windows account). An **ER diagram** of tables and relations (drag, zoom, auto-arrange, save as picture). Browse, search, filter, sort and edit data, add and delete rows, follow relations, import CSV/JSON and export CSV/JSON/SQL. Change the design: create, rename, empty and delete tables; add, change, rename and delete columns; keys, relations, indexes and views, each previewed before it runs. A SQL runner with trial runs that undo themselves and confirmation for destructive statements. Views, procedures and functions with their definitions |
 | **Source control (Git)** | On every .NET project, solution and front-end app: start tracking (with a safe ignore list), see changed files with line-by-line differences, save versions of all or some files, throw changes away, set work aside, history with search and per-version details, undo a version, labels, branches (create, switch, merge with conflict help, rename, delete), get latest / send with live progress, and copy a project from any Git server |
+| **Typed API client** | One click writes a typed client for the connected .NET API into an Angular, React, Next.js or Vue app: an Angular `ApiService` (HttpClient, Observables, base URL from `environment.ts`) or a fetch client (TypeScript or JavaScript) with interfaces built from the C# request/response classes, bearer tokens and readable errors. Regenerate after API changes; undo from History |
+| **OpenAPI export** | Download an OpenAPI 3 document for any .NET project from its source code, without running it |
+| **Command palette** | `Ctrl+K` anywhere: jump to projects, endpoints, tables, databases, pages and actions |
 | **Front-end apps** | Angular, React, Next.js and Vue: pages and routes, components, every API call matched against the linked .NET API, environment settings, install, run with live reload, build, health check and deploy (including Docker with nginx) |
 | **Health check** | Scores the project and lists problems: duplicate routes, open endpoints in a protected API, keys and certificates in the project folder, passwords in config files, error details sent to callers, data changes through GET, unsupported .NET versions, old packages, missing descriptions |
 | **Upgrade assistant** | Moves .NET Core 2.x/3.x and .NET 5–9 projects (optionally with the projects they use) to a newer .NET: target framework (also in `Directory.Build.props`), version-matched packages (also in `Directory.Packages.props`), obsolete ASP.NET Core 2 packages, and package conflicts found by restore. One Undo reverts it all |
@@ -43,7 +46,7 @@ React UI (Vite, TypeScript)  ──/api──▶  Local helper service (ASP.NET 
   * **Controllers**: `[ApiController]` classes, `[Route]` and `[Http*]` attributes, including `[controller]` and `[action]` tokens.
   * **Minimal APIs**: `MapGet/MapPost/…` calls, `MapGroup` prefixes followed through variables, and `WithName`/`WithSummary`/`RequireAuthorization` chains.
 * Changes are small, targeted text edits based on the syntax tree, so the rest of the file keeps its formatting. When needed, the studio also wires up `Program.cs`, for example `AddControllers()`/`MapControllers()` or registering a new endpoint group.
-* History backups, saved connections and settings are stored in `%LOCALAPPDATA%\Stackwright`, never inside your project. Database passwords are encrypted with Windows DPAPI and never sent back to the browser.
+* History backups, saved connections and settings are stored in `%LOCALAPPDATA%\QosriStudio`, never inside your project. Database passwords are encrypted with Windows DPAPI and never sent back to the browser.
 
 ## .NET version support
 

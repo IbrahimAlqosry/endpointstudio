@@ -5,9 +5,9 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 /// <summary>Knows which .NET tools are installed, builds and runs projects, and sends test requests to them.</summary>
 public class DotnetService : IDisposable

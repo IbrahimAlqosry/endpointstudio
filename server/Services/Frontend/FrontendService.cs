@@ -4,9 +4,13 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
+using QosriStudio.Server.Services.Contracts;
 
-namespace Stackwright.Server.Services.Frontend;
+namespace QosriStudio.Server.Services.Frontend;
+
+public record ClientFile(string Path, bool Exists, bool Kept);
+public record ClientPlan(string Folder, string Style, int Operations, int Types, List<ClientFile> Files, string Usage);
 
 public record EndpointBrief(string Id, string Method, string Route, string Name);
 
@@ -120,6 +124,76 @@ public class FrontendService(HistoryService history, FileSystemService fs, JobSe
             m.Routes.OrderBy(r => r.Path).ToList(), m.Components.OrderBy(c => c.Kind).ThenBy(c => c.Name).ToList(), m.ApiCalls, m.Warnings, m.SourceFiles,
             backend?.CsprojPath, backend?.Name, unused,
             backend is null ? SuggestBackends(m.Directory) : [], SupportNote(m), history.GetEntries(m.PackageJson));
+    }
+
+    // ------------------------------------------------------------------ Typed API client
+
+    private (List<GeneratedFile> Files, string Folder, string Style, ApiContract Contract, string Usage) PlanClient(FrontendModel m, ProjectModel backend)
+    {
+        var contract = ApiContract.From(backend);
+        if (contract.Operations.Count == 0) throw new StudioException("The connected API has no endpoints yet.");
+        var dir = m.Directory;
+        string folder;
+        if (m.Framework == "Angular") folder = Directory.Exists(System.IO.Path.Combine(dir, "src", "app", "core")) ? "src/app/core/api" : "src/app/api";
+        else if (m.Framework == "Next.js") folder = Directory.Exists(System.IO.Path.Combine(dir, "src")) ? "src/lib/api" : "lib/api";
+        else folder = Directory.Exists(System.IO.Path.Combine(dir, "src")) ? "src/api" : "api";
+
+        // Angular: use the API address from environment.ts when it has one
+        string? envImport = null, envProp = null;
+        var env = System.IO.Path.Combine(dir, "src", "environments", "environment.ts");
+        if (m.Framework == "Angular" && File.Exists(env))
+        {
+            var match = Regex.Match(File.ReadAllText(env), @"\b(\w*(?:api|Api|API|base|Base)\w*(?:Url|URL|Uri|Address|Root)\w*|apiUrl|baseUrl|apiBase|serverUrl)\s*:");
+            if (match.Success)
+            {
+                envProp = match.Groups[1].Value;
+                var rel = System.IO.Path.GetRelativePath(System.IO.Path.Combine(dir, folder.Replace('/', System.IO.Path.DirectorySeparatorChar)), System.IO.Path.Combine(dir, "src", "environments", "environment")).Replace(System.IO.Path.DirectorySeparatorChar, '/');
+                envImport = rel.StartsWith('.') ? rel : "./" + rel;
+            }
+        }
+        var envExpr = m.Framework == "Next.js" ? "process.env.NEXT_PUBLIC_API_URL"
+            : m.BuildTool == "Create React App" ? "process.env.REACT_APP_API_URL"
+            : m.BuildTool == "Vite" || m.Framework == "Vue" ? "import.meta.env.VITE_API_URL"
+            : "''";
+        var files = TypeScriptClient.Generate(contract, m.Framework, m.TypeScript || m.Framework == "Angular", folder, envImport, envProp, backend.Name, envExpr);
+        var style = m.Framework == "Angular" ? "Angular service (HttpClient, Observables)" : $"{(m.TypeScript ? "TypeScript" : "JavaScript")} client using fetch";
+        var usage = m.Framework == "Angular"
+            ? $"Inject ApiService and call, for example, api.{contract.Operations[0].Tag}.{contract.Operations[0].Name}(…).subscribe(…)." + (envProp is null ? " Provide API_BASE_URL in your app config." : $" The address comes from environment.{envProp}.")
+            : $"import {{ api }} from '{(folder.StartsWith("src/") ? "@/" + folder[4..] : folder)}' (or a relative path), then await api.{contract.Operations[0].Tag}.{contract.Operations[0].Name}(…). Set {Regex.Match(envExpr, @"[A-Z_]+_API_URL|VITE_API_URL").Value} to the API address.";
+        return (files, folder, style, contract, usage);
+    }
+
+    private (FrontendModel Model, ProjectModel Backend) LoadLinked(string path)
+    {
+        var (m, backend) = Load(path);
+        if (backend is null) throw new StudioException("Connect this app to its .NET API project first.");
+        if (m.Framework != "Angular" && !m.Sources.Keys.Any()) throw new StudioException("No source files were found in this app.");
+        return (m, backend);
+    }
+
+    public ClientPlan PreviewClient(string path)
+    {
+        var (m, backend) = LoadLinked(path);
+        var (files, folder, style, contract, usage) = PlanClient(m, backend);
+        return new ClientPlan(folder, style, contract.Operations.Count, contract.Types.Count,
+            files.Select(f => { var exists = File.Exists(System.IO.Path.Combine(m.Directory, f.RelativePath)); return new ClientFile(f.RelativePath, exists, exists && f.KeepIfExists); }).ToList(), usage);
+    }
+
+    public string GenerateClient(string path)
+    {
+        var (m, backend) = LoadLinked(path);
+        var (files, folder, _, contract, _) = PlanClient(m, backend);
+        var changes = history.Begin(m.PackageJson, $"Generated the API client in {folder}");
+        var written = 0;
+        foreach (var f in files)
+        {
+            var full = System.IO.Path.Combine(m.Directory, f.RelativePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            if (f.KeepIfExists && File.Exists(full)) continue;
+            changes.Write(full, f.Content);
+            written++;
+        }
+        changes.Commit();
+        return $"Wrote {written} file{(written == 1 ? "" : "s")} to {folder}: {contract.Operations.Count} endpoints and {contract.Types.Count} types.";
     }
 
     public static string? SupportNote(FrontendModel m) => m.Framework switch
@@ -544,7 +618,7 @@ public class FrontendService(HistoryService history, FileSystemService fs, JobSe
         if (!File.Exists(System.IO.Path.Combine(m.Directory, "package-lock.json")) && !File.Exists(System.IO.Path.Combine(m.Directory, "yarn.lock")) && !File.Exists(System.IO.Path.Combine(m.Directory, "pnpm-lock.yaml")))
             findings.Add(new("low", "Reliability", "No lock file", "Without package-lock.json, every install can pick different package versions, so builds may change unexpectedly. Run “Install packages” once and keep the lock file.", []));
         if (m.NeedsLegacyOpenSsl)
-            findings.Add(new("info", "Maintenance", "Built with older tools", "This project's build tools need a compatibility switch on current Node.js versions. Stackwright adds it automatically when running and building.", []));
+            findings.Add(new("info", "Maintenance", "Built with older tools", "This project's build tools need a compatibility switch on current Node.js versions. QosriStudio adds it automatically when running and building.", []));
 
         var penalty = findings.Sum(f => f.Severity switch { "high" => 20, "medium" => 10, "low" => 4, _ => 0 });
         var score = Math.Clamp(100 - penalty, 0, 100);

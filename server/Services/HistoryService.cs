@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services;
+namespace QosriStudio.Server.Services;
 
 /// <summary>
 /// Keeps a copy of every file before the studio changes it, so any change can be undone.

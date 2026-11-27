@@ -1,7 +1,7 @@
 using System.Text;
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services.Db;
+namespace QosriStudio.Server.Services.Db;
 
 /// <summary>How each database spells names, paging and schema changes.</summary>
 public sealed class SqlDialect

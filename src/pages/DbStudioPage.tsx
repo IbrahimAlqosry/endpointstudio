@@ -8,6 +8,7 @@ import { SqlRunner } from '../components/db/SqlRunner'
 import { ChangeDialog, CreateTableDialog, StructurePanel } from '../components/db/Structure'
 import { Alert, Button, Choice, Empty, Field, Modal, Spinner, Switch, errorText, timeAgo, useConfirm, useToast } from '../components/ui'
 import { href, navigate } from '../router'
+import { usePaletteItems, type PaletteItem } from '../palette'
 import type { DbConnectionInfo, DbProvider, DbRef, DbSchema, DdlChange, SavedConnection } from '../types'
 
 const PROVIDERS: { id: DbProvider; title: string; desc: string; port: number | null; user: string }[] = [
@@ -213,6 +214,17 @@ function Studio({ id, database }: { id: string; database?: string }) {
   const selTable = sel?.kind === 'table' ? tables.find(t => tableKey(t) === sel.key) : undefined
   const selView = sel?.kind === 'view' ? schema?.views.find(v => tableKey(v) === sel.key) : undefined
   const selRoutine = sel?.kind === 'routine' ? schema?.routines.find(r => tableKey(r) === sel.key) : undefined
+
+  const paletteItems = useMemo<PaletteItem[] | null>(() => schema && [
+    { id: 'db-diagram', group: schema.database || 'Database', title: 'Diagram', icon: 'layers', keywords: 'er relations', run: () => setMode('diagram') },
+    { id: 'db-sql', group: schema.database || 'Database', title: 'SQL', icon: 'code', keywords: 'query run', run: () => setMode('sql') },
+    { id: 'db-newtable', group: schema.database || 'Database', title: 'New table', icon: 'plus', keywords: 'create', run: () => setCreating(true) },
+    ...schema.tables.map(t => ({ id: 'tb-' + tableKey(t), group: 'Tables', title: t.name, subtitle: t.schema || undefined, icon: 'table', badge: t.rows != null ? String(t.rows) : undefined,
+      keywords: t.columns.map(c => c.name).join(' '), run: () => { setSel({ kind: 'table', key: tableKey(t) }); setMode('object'); setObjTab('data'); setJumpFilters(undefined) } })),
+    ...schema.views.map(v => ({ id: 'vw-' + tableKey(v), group: 'Views', title: v.name, subtitle: v.schema || undefined, icon: 'eye', run: () => { setSel({ kind: 'view', key: tableKey(v) }); setMode('object'); setObjTab('data') } })),
+    ...schema.routines.map(r => ({ id: 'rt-' + tableKey(r), group: 'Procedures & functions', title: r.name, subtitle: r.kind, icon: 'zap', run: () => { setSel({ kind: 'routine', key: tableKey(r) }); setMode('object') } })),
+  ], [schema])
+  usePaletteItems('db', paletteItems)
 
   const openTable = (key: string, filters?: Record<string, string>) => {
     if (schema?.tables.some(t => tableKey(t) === key)) { setSel({ kind: 'table', key }); setMode('object'); setObjTab('data'); setJumpFilters(filters) }

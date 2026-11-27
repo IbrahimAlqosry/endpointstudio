@@ -1,6 +1,6 @@
-using Stackwright.Server.Models;
+using QosriStudio.Server.Models;
 
-namespace Stackwright.Server.Services.Db;
+namespace QosriStudio.Server.Services.Db;
 
 public record DbsColumn(string Name, string Type, bool Nullable, string? Default, bool Identity, bool PrimaryKey, bool Computed, int Position, int? MaxLength);
 public record DbsTable(string Schema, string Name, long? Rows, List<DbsColumn> Columns, List<string> PrimaryKey, string? PkName);
