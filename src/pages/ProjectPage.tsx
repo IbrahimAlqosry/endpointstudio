@@ -5,6 +5,10 @@ import { EndpointDrawer } from '../components/EndpointDrawer'
 import { EndpointEditor } from '../components/EndpointEditor'
 import { GitPanel } from '../components/GitPanel'
 import { FilesPanel } from '../components/FilesPanel'
+import { AgentPanel } from '../components/AgentPanel'
+import { BuildMenu } from '../components/BuildMenu'
+import { PackagesPanel } from '../components/PackagesPanel'
+import { TestsPanel } from '../components/TestsPanel'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { usePaletteItems, type PaletteItem } from '../palette'
 import { DeployPanel } from '../components/DeployPanel'
@@ -20,6 +24,8 @@ import type { BuildResult, EndpointInfo, ProjectDetails, RunStatus } from '../ty
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 const METHOD_COLORS: Record<string, string> = { GET: 'var(--get)', POST: 'var(--post)', PUT: 'var(--put)', PATCH: 'var(--patch)', DELETE: 'var(--delete)' }
 
+type ProjectView = 'endpoints' | 'settings' | 'deploy' | 'git' | 'files' | 'terminal' | 'packages' | 'tests' | 'agent'
+
 export function ProjectPage({ path, onChanged }: { path: string; onChanged: () => void }) {
   const toast = useToast()
   const confirm = useConfirm()
@@ -34,7 +40,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
   const [build, setBuild] = useState<BuildResult | 'loading' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
-  const [view, setView] = useState<'endpoints' | 'settings' | 'deploy' | 'git' | 'files' | 'terminal'>(() => (new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') as 'settings' | 'deploy' | 'git' | 'files' | 'terminal') || 'endpoints')
+  const [view, setView] = useState<ProjectView>(() => (new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('tab') as ProjectView) || 'endpoints')
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [run, setRun] = useState<RunStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -127,7 +133,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
 
   const paletteItems = useMemo<PaletteItem[] | null>(() => {
     if (!project) return null
-    const tab = (v: 'endpoints' | 'settings' | 'deploy' | 'git' | 'files' | 'terminal', title: string, icon: string, keywords = '') =>
+    const tab = (v: ProjectView, title: string, icon: string, keywords = '') =>
       ({ id: 'tab-' + v, group: project.name, title, icon, keywords, run: () => setView(v) })
     return [
       tab('endpoints', 'Endpoints', 'layers'),
@@ -136,6 +142,9 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
       tab('git', 'Source control', 'history', 'git commit branch push pull'),
       tab('files', 'Files', 'folder', 'edit code explorer'),
       tab('terminal', 'Terminal', 'monitor', 'shell command powershell cmd'),
+      tab('packages', 'Packages', 'box', 'nuget update add'),
+      tab('tests', 'Tests', 'checkCircle', 'xunit nunit mstest run'),
+      tab('agent', 'AI agent', 'sparkles', 'claude cursor ai'),
       { id: 'act-health', group: project.name, title: 'Health check', icon: 'checkCircle', keywords: 'security problems', run: () => setHealthOpen(true) },
       ...project.endpoints.map(e => ({
         id: 'ep-' + e.id, group: 'Endpoints', title: `${e.httpMethod} ${e.route}`, subtitle: e.summary ?? e.name, icon: 'send', keywords: e.name,
@@ -192,6 +201,7 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
           {project.capabilities.supportNote && <Button icon="rocket" onClick={() => setUpgradeOpen(true)}>Upgrade</Button>}
           <Button icon="history" onClick={() => setHistoryOpen(true)}>History{project.history.length > 0 ? ` (${project.history.length})` : ''}</Button>
           <Button icon="hammer" onClick={runBuild} disabled={run?.running || !project.capabilities.canBuild} title={project.capabilities.buildNote ?? undefined}>Check build</Button>
+          {project.capabilities.canBuild && <BuildMenu path={path} label="Build" />}
           <Button variant="primary" icon="plus" onClick={() => setEditor({ mode: 'add' })}>Add endpoint</Button>
         </div>
       </div>
@@ -216,12 +226,18 @@ export function ProjectPage({ path, onChanged }: { path: string; onChanged: () =
         <button className={`tab${view === 'git' ? ' active' : ''}`} onClick={() => setView('git')}><span className="row gap-6"><Icon name="history" size={15} />Source control</span></button>
         <button className={`tab${view === 'files' ? ' active' : ''}`} onClick={() => setView('files')}><span className="row gap-6"><Icon name="folder" size={15} />Files</span></button>
         <button className={`tab${view === 'terminal' ? ' active' : ''}`} onClick={() => setView('terminal')}><span className="row gap-6"><Icon name="monitor" size={15} />Terminal</span></button>
+        <button className={`tab${view === 'packages' ? ' active' : ''}`} onClick={() => setView('packages')}><span className="row gap-6"><Icon name="box" size={15} />Packages</span></button>
+        <button className={`tab${view === 'tests' ? ' active' : ''}`} onClick={() => setView('tests')}><span className="row gap-6"><Icon name="checkCircle" size={15} />Tests</span></button>
+        <button className={`tab${view === 'agent' ? ' active' : ''}`} onClick={() => setView('agent')}><span className="row gap-6"><Icon name="sparkles" size={15} />AI agent</span></button>
       </div>
 
       {view === 'settings' && <SettingsPanel path={path} onChanged={load} />}
       {view === 'git' && <GitPanel path={path} />}
       {view === 'files' && <FilesPanel root={path} />}
       {view === 'terminal' && <TerminalPanel root={path} kind="dotnet" />}
+      {view === 'packages' && <PackagesPanel path={path} />}
+      {view === 'tests' && <TestsPanel path={project.solutionPath ?? path} />}
+      {view === 'agent' && <AgentPanel root={path} />}
       {view === 'deploy' && <DeployPanel project={{ path: project.path, name: project.name, platform: project.capabilities.platform }} />}
       {view === 'endpoints' && <>
       <RunBar run={run} busy={busy} onToggle={toggleRun} onExport={exportPostman} canRun={project.capabilities.canRun} runNote={project.capabilities.runNote} framework={project.capabilities.platform === 'NetFramework'} />

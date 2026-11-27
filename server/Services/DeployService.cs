@@ -561,6 +561,35 @@ public class DeployService(JobService jobs, DotnetService dotnet, HistoryService
 
     // ------------------------------------------------------------------ Solution build
 
+    /// <summary>Build, rebuild or clean one project or a whole solution, in Debug or Release.</summary>
+    public string BuildTarget(string path, string action, string configuration)
+    {
+        var full = Path.GetFullPath(path);
+        if (!File.Exists(full)) throw new StudioException("The project or solution file could not be found.");
+        action = action is "rebuild" or "clean" ? action : "build";
+        configuration = configuration is "Release" ? "Release" : "Debug";
+        var verb = action == "rebuild" ? "Rebuild" : action == "clean" ? "Clean" : "Build";
+        return jobs.Start(full, "build", $"{verb} {Path.GetFileNameWithoutExtension(full)} ({configuration})", async ctx =>
+        {
+            var dir = Path.GetDirectoryName(full)!;
+            var text = File.ReadAllText(full);
+            var legacy = text.Contains("349c5851-65df-11da-9384-00065b846f21", StringComparison.OrdinalIgnoreCase)
+                         || full.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) && !text.Contains("Sdk=\"", StringComparison.OrdinalIgnoreCase)
+                         || File.Exists(Path.Combine(dir, "packages.config"));
+            int exit;
+            if (legacy)
+            {
+                var tc = await dotnet.GetToolchainAsync();
+                var msbuild = tc.MsBuildPath ?? throw new StudioException("This has .NET Framework projects, which need Visual Studio or the Build Tools to build.");
+                exit = await JobService.RunAsync(ctx, msbuild, [full, $"-t:{verb}", "-restore", "-p:RestorePackagesConfig=true", $"-p:Configuration={configuration}", "-nologo", "-v:m"], dir);
+            }
+            else if (action == "clean") exit = await JobService.RunAsync(ctx, "dotnet", ["clean", full, "-c", configuration, "-nologo", "-v", "m"], dir);
+            else exit = await JobService.RunAsync(ctx, "dotnet", action == "rebuild" ? ["build", full, "-c", configuration, "--no-incremental", "-nologo", "-v", "m"] : ["build", full, "-c", configuration, "-nologo", "-v", "m"], dir);
+            if (exit != 0) throw new StudioException(action == "clean" ? "Cleaning failed. See the log." : "There are build errors. They're listed in the log (lines with “error”).");
+            return action == "clean" ? "Build output removed." : "Built without errors.";
+        });
+    }
+
     public string BuildSolution(string slnPath)
     {
         var full = Path.GetFullPath(slnPath);

@@ -262,3 +262,16 @@ export interface FileContent { path: string; text: string; binary: boolean; tooL
 export interface FileSearchResult { files: string[]; hits: { path: string; line: number; text: string }[] }
 export interface TerminalInfo { id: string; shell: string; directory: string; running: boolean; exitCode: number | null }
 export interface TerminalOutput { chunks: string[]; next: number; running: boolean; exitCode: number | null }
+
+// ---------- Packages & tests ----------
+export interface PackageItem { id: string; requested: string | null; installed: string | null; latest: string | null; safeLatest: string | null; dev: boolean; transitive: boolean; vulnerabilities: string[]; project: string | null }
+export interface PackageList { kind: 'nuget' | 'npm'; manager: string; packages: PackageItem[]; checkedUpdates: boolean; notes: string[] }
+export interface PackageSearchItem { id: string; version: string; description: string | null; downloads: number | null; verified: boolean }
+export interface TestCaseResult { name: string; className: string; outcome: 'passed' | 'failed' | 'skipped'; durationMs: number; message: string | null; stackTrace: string | null; output: string | null; project: string | null }
+export interface TestRunResult { total: number; passed: number; failed: number; skipped: number; durationMs: number; tests: TestCaseResult[]; projects: string[] }
+
+// ---------- Agents, builds, running apps ----------
+export interface AgentTool { id: string; name: string; installed: boolean; path: string | null; note: string | null }
+export interface AgentEvent { seq: number; kind: 'prompt' | 'info' | 'text' | 'tool' | 'warn' | 'error' | 'result' | 'log' | 'done'; text: string; tool: string | null; time: string }
+export interface AgentStatus { id: string; tool: string; running: boolean; sessionId: string | null; events: AgentEvent[]; next: number; costUsd: number | null; result: string | null; failed: boolean }
+export interface RunningItem { path: string; name: string; kind: 'dotnet' | 'frontend'; status: RunStatus }

@@ -221,6 +221,9 @@ public class DotnetService : IDisposable
         }
     }
 
+    /// <summary>Every API this app has started (for the Running view).</summary>
+    public List<string> RunningProjects() => _running.Where(kv => !kv.Value.Exited || kv.Value.State == "failed").Select(kv => kv.Key).ToList();
+
     public bool IsRunning(string csproj) =>
         _running.TryGetValue(Path.GetFullPath(csproj), out var app) && !app.Exited;
 

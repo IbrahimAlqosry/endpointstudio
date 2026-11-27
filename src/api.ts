@@ -1,7 +1,7 @@
 import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
   DeployProfile, DeployRequest, FrontendDetails, InspectResult, RunStatus as FeRunStatus, DeployTools, GenerateProjectResult, HealthReport, JobStatus, SettingChange, SettingsInfo, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
-  ClientPlan, FileContent, FileSearchResult, ProjectFileItem, TerminalInfo, TerminalOutput, GitBranch, GitCommit, GitCommitDetails, GitDiff, GitStash, GitStatus,
+  AgentStatus, AgentTool, RunningItem, ClientPlan, PackageList, PackageSearchItem, TestRunResult, FileContent, FileSearchResult, ProjectFileItem, TerminalInfo, TerminalOutput, GitBranch, GitCommit, GitCommitDetails, GitDiff, GitStash, GitStatus,
   DbExtras, DbsGrant, RoutineDetails,
   DbRef, DbSchema, DdlChange, RowsResult, SavedConnection, SqlResult,
 } from './types'
@@ -184,4 +184,24 @@ export const api = {
   terminalInput: (id: string, text: string) => request<void>('POST', `/api/terminal/${id}/input`, { text }),
   terminalStop: (id: string) => request<void>('POST', `/api/terminal/${id}/stop`),
   terminalClose: (id: string) => request<void>('DELETE', `/api/terminal/${id}`),
+
+  // Packages & tests
+  packages: (path: string, updates = false) => request<PackageList>('GET', `/api/packages/?path=${encodeURIComponent(path)}&updates=${updates}`),
+  packageSearch: (path: string, q: string) => request<PackageSearchItem[]>('GET', `/api/packages/search?path=${encodeURIComponent(path)}&q=${encodeURIComponent(q)}`),
+  packageVersions: (path: string, id: string) => request<string[]>('GET', `/api/packages/versions?path=${encodeURIComponent(path)}&id=${encodeURIComponent(id)}`),
+  packageAdd: (path: string, id: string, version?: string | null, dev = false) => request<{ jobId: string }>('POST', '/api/packages/add', { path, id, version, dev }),
+  packageRemove: (path: string, id: string) => request<{ jobId: string }>('POST', '/api/packages/remove', { path, id }),
+  testsRun: (path: string, filter?: string | null, noBuild = false) => request<{ jobId: string }>('POST', '/api/tests/run', { path, filter, noBuild }),
+  testResults: (jobId: string) => request<TestRunResult | null>('GET', `/api/tests/results/${jobId}`),
+
+  // Builds, running apps, AI agents
+  buildTarget: (path: string, action: 'build' | 'rebuild' | 'clean' = 'build', configuration: 'Debug' | 'Release' = 'Debug') =>
+    request<{ jobId: string }>('POST', `/api/build?${q(path)}&action=${action}&configuration=${configuration}`),
+  running: () => request<RunningItem[]>('GET', '/api/running'),
+  agentTools: () => request<AgentTool[]>('GET', '/api/agent/tools'),
+  agentRun: (root: string, tool: string, prompt: string, mode: string, model?: string | null, sessionId?: string | null) =>
+    request<AgentStatus>('POST', '/api/agent/run', { root, tool, prompt, mode, model, sessionId }),
+  agentStatus: (id: string, since: number) => request<AgentStatus>('GET', `/api/agent/${id}?since=${since}`),
+  agentStop: (id: string) => request<void>('POST', `/api/agent/${id}/stop`),
+  openInCursor: (root: string, file?: string | null, line?: number | null) => request<void>('POST', '/api/agent/open-cursor', { root, file, line }),
 }

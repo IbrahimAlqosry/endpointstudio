@@ -13,6 +13,7 @@ import { SolutionPage } from './pages/SolutionPage'
 import { RecoverPage } from './pages/RecoverPage'
 import { FrontendPage } from './pages/FrontendPage'
 import { DbStudioPage } from './pages/DbStudioPage'
+import { RunningPage } from './pages/RunningPage'
 import { href, openPath, routeFor, useRoute } from './router'
 import type { RecentProject, SavedConnection } from './types'
 
@@ -37,6 +38,11 @@ function Shell() {
   const [defaultFolder, setDefaultFolder] = useState('')
   useEffect(() => { api.system().then(s => setDefaultFolder(s.defaultLocation)).catch(() => {}) }, [])
   const [connections, setConnections] = useState<SavedConnection[]>([])
+  const [runningCount, setRunningCount] = useState(0)
+  useEffect(() => {
+    const tick = () => api.running().then(r => setRunningCount(r.filter(x => x.status.running).length)).catch(() => {})
+    tick(); const t = setInterval(tick, 5000); return () => clearInterval(t)
+  }, [])
   useEffect(() => { api.dbsConnections().then(setConnections).catch(() => {}) }, [route])
 
   const paletteBase = useMemo<PaletteItem[]>(() => {
@@ -45,6 +51,7 @@ function Shell() {
       { id: 'p-home', group: 'Go to', title: 'Home', icon: 'home', run: go(href({ page: 'home' })) },
       { id: 'p-open', group: 'Go to', title: 'Open a project…', icon: 'folderOpen', keywords: 'browse solution csproj angular react', run: () => { setPickerStart(undefined); setPicker(true) } },
       { id: 'p-clone', group: 'Go to', title: 'Copy a project from Git…', icon: 'download', keywords: 'clone github gitlab repository', run: () => setCloneOpen(true) },
+      { id: 'p-running', group: 'Go to', title: 'Running apps', icon: 'play', keywords: 'stop restart logs', run: go(href({ page: 'running' })) },
       { id: 'p-db', group: 'Go to', title: 'Database Studio', icon: 'table', keywords: 'sql tables diagram data', run: go(href({ page: 'db' })) },
       { id: 'p-new', group: 'Go to', title: 'New API from a database', icon: 'database', keywords: 'generate create clean architecture jwt', run: go(href({ page: 'new' })) },
       { id: 'p-recover', group: 'Go to', title: 'Recover code from DLLs', icon: 'wand', keywords: 'decompile reverse', run: go(href({ page: 'recover' })) },
@@ -81,6 +88,7 @@ function Shell() {
           <a className={`nav-item${route.page === 'home' ? ' active' : ''}`} href={href({ page: 'home' })}><Icon name="home" size={17} /> Home</a>
           <button className="nav-item" onClick={() => { setPickerStart(undefined); setPicker(true) }}><Icon name="folderOpen" size={17} /> Open project…</button>
           <button className="nav-item" onClick={() => setCloneOpen(true)}><Icon name="download" size={17} /> Copy from Git…</button>
+          <a className={`nav-item${route.page === 'running' ? ' active' : ''}`} href={href({ page: 'running' })}><Icon name="play" size={17} /> Running{runningCount > 0 && <span className="count" style={{ color: 'var(--success)' }}>{runningCount}</span>}</a>
           <a className={`nav-item${route.page === 'db' ? ' active' : ''}`} href={href({ page: 'db' })}><Icon name="table" size={17} /> Database Studio</a>
           <a className={`nav-item${route.page === 'new' ? ' active' : ''}`} href={href({ page: 'new' })}><Icon name="database" size={17} /> New from database</a>
           <a className={`nav-item${route.page === 'recover' ? ' active' : ''}`} href={href({ page: 'recover' })}><Icon name="wand" size={17} /> Recover code</a>
@@ -128,6 +136,7 @@ function Shell() {
         {route.page === 'solution' && <SolutionPage key={route.path} path={route.path} onChanged={refreshRecent} />}
         {route.page === 'new' && <NewProjectPage />}
         {route.page === 'recover' && <RecoverPage />}
+        {route.page === 'running' && <RunningPage />}
         {route.page === 'db' && <DbStudioPage key={(route.id ?? '') + (route.database ?? '')} id={route.id} database={route.database} />}
         {route.page === 'frontend' && <FrontendPage key={route.path} path={route.path} onChanged={refreshRecent} />}
       </main>

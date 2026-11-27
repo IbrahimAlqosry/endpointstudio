@@ -8,6 +8,7 @@ export type Route =
   | { page: 'recover' }
   | { page: 'frontend'; path: string }
   | { page: 'db'; id?: string; database?: string }
+  | { page: 'running' }
 
 function parse(hash: string): Route {
   const h = hash.replace(/^#/, '')
@@ -17,6 +18,7 @@ function parse(hash: string): Route {
   if (p === '/solution' && params.get('path')) return { page: 'solution', path: params.get('path')! }
   if (p === '/new') return { page: 'new' }
   if (p === '/recover') return { page: 'recover' }
+  if (p === '/running') return { page: 'running' }
   if (p === '/db') return { page: 'db', id: params.get('c') ?? undefined, database: params.get('d') ?? undefined }
   if (p === '/frontend' && params.get('path')) return { page: 'frontend', path: params.get('path')! }
   return { page: 'home' }
@@ -28,6 +30,7 @@ export function href(route: Route): string {
     case 'solution': return `#/solution?path=${encodeURIComponent(route.path)}`
     case 'new': return '#/new'
     case 'recover': return '#/recover'
+    case 'running': return '#/running'
     case 'db': return '#/db' + (route.id ? `?c=${encodeURIComponent(route.id)}${route.database ? `&d=${encodeURIComponent(route.database)}` : ''}` : '')
     case 'frontend': return `#/frontend?path=${encodeURIComponent(route.path)}`
     default: return '#/'

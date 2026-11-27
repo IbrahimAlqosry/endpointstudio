@@ -479,6 +479,9 @@ public class FrontendService(HistoryService history, FileSystemService fs, JobSe
     private static readonly Regex UrlRx = new(@"https?://(?:localhost|127\.0\.0\.1|\[::1?\]|0\.0\.0\.0)(?::\d+)?/?\S*", RegexOptions.Compiled);
     private static readonly Regex Ansi = new(@"\x1B\[[0-9;?]*[ -/]*[@-~]", RegexOptions.Compiled);
 
+    /// <summary>Every front-end dev server this app has started (for the Running view).</summary>
+    public List<string> RunningApps() => _servers.Where(kv => !kv.Value.Process.HasExited || kv.Value.State == "failed").Select(kv => kv.Key).ToList();
+
     public RunStatus DevStatus(string path)
     {
         var key = NormalizePath(path);

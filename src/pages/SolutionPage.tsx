@@ -3,8 +3,11 @@ import { api } from '../api'
 import { Icon } from '../components/Icon'
 import { GitPanel } from '../components/GitPanel'
 import { FilesPanel } from '../components/FilesPanel'
+import { AgentPanel } from '../components/AgentPanel'
+import { BuildMenu } from '../components/BuildMenu'
+import { PackagesPanel } from '../components/PackagesPanel'
+import { TestsPanel } from '../components/TestsPanel'
 import { TerminalPanel } from '../components/TerminalPanel'
-import { JobView } from '../components/JobView'
 import { Button, Empty, Spinner, errorText, useToast } from '../components/ui'
 import { href, navigate } from '../router'
 import type { SolutionDetails, SolutionProjectInfo } from '../types'
@@ -20,11 +23,10 @@ export const ROLE_INFO: Record<string, { icon: string; color: string; desc: stri
 }
 
 export function SolutionPage({ path, onChanged }: { path: string; onChanged: () => void }) {
-  const [view, setView] = useState<'projects' | 'git' | 'files' | 'terminal'>('projects')
+  const [view, setView] = useState<'projects' | 'git' | 'files' | 'terminal' | 'packages' | 'tests' | 'agent'>('projects')
   const toast = useToast()
   const [sln, setSln] = useState<SolutionDetails | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [buildJob, setBuildJob] = useState<string | null>(null)
 
   useEffect(() => {
     api.solution(path).then(s => { setSln(s); onChanged() }).catch(e => setError(errorText(e)))
@@ -61,20 +63,28 @@ export function SolutionPage({ path, onChanged }: { path: string; onChanged: () 
             <button className="btn ghost sm" style={{ flexShrink: 0 }} onClick={() => api.openEditor(sln.path).catch(e => toast.error(errorText(e)))}><Icon name="code" size={14} />Open in VS Code</button>
           </div>
         </div>
-        <Button variant="primary" icon="hammer" onClick={() => api.buildSolution(sln.path).then(r => setBuildJob(r.jobId)).catch(e => toast.error(errorText(e)))}>Build solution</Button>
+        <div className="row gap-6">
+          {apis.length > 1 && <Button icon="play" onClick={async () => { for (const p of apis) await api.run(p.path).catch(e => toast.error(errorText(e))); toast.success('Starting every API project. See them under Running.') }}>Run all APIs</Button>}
+          <BuildMenu path={sln.path} label="Build solution" variant="primary" />
+        </div>
       </div>
 
-      {buildJob && <div className="card pad" style={{ marginBottom: 20 }}><JobView key={buildJob} jobId={buildJob} /></div>}
 
       <div className="tabs" style={{ marginTop: 0, marginBottom: 18 }}>
         <button className={`tab${view === 'projects' ? ' active' : ''}`} onClick={() => setView('projects')}><span className="row gap-6"><Icon name="layers" size={15} />Projects <span className="badge" style={{ height: 18 }}>{sln.projects.length}</span></span></button>
         <button className={`tab${view === 'git' ? ' active' : ''}`} onClick={() => setView('git')}><span className="row gap-6"><Icon name="history" size={15} />Source control</span></button>
         <button className={`tab${view === 'files' ? ' active' : ''}`} onClick={() => setView('files')}><span className="row gap-6"><Icon name="folder" size={15} />Files</span></button>
         <button className={`tab${view === 'terminal' ? ' active' : ''}`} onClick={() => setView('terminal')}><span className="row gap-6"><Icon name="monitor" size={15} />Terminal</span></button>
+        <button className={`tab${view === 'packages' ? ' active' : ''}`} onClick={() => setView('packages')}><span className="row gap-6"><Icon name="box" size={15} />Packages</span></button>
+        <button className={`tab${view === 'tests' ? ' active' : ''}`} onClick={() => setView('tests')}><span className="row gap-6"><Icon name="checkCircle" size={15} />Tests</span></button>
+        <button className={`tab${view === 'agent' ? ' active' : ''}`} onClick={() => setView('agent')}><span className="row gap-6"><Icon name="sparkles" size={15} />AI agent</span></button>
       </div>
       {view === 'git' && <GitPanel path={sln.path} />}
       {view === 'files' && <FilesPanel root={sln.path} />}
       {view === 'terminal' && <TerminalPanel root={sln.path} kind="solution" />}
+      {view === 'packages' && <PackagesPanel path={sln.path} projects={sln.projects.map(p => ({ name: p.name, path: p.path }))} />}
+      {view === 'tests' && <TestsPanel path={sln.path} />}
+      {view === 'agent' && <AgentPanel root={sln.path} />}
       {view === 'projects' && <>
       <div className="stats">
         <div className="card stat"><div className="stat-value">{sln.projects.length}</div><div className="stat-label">Projects</div></div>
@@ -125,7 +135,32 @@ function ProjectCard({ p, usedBy, primary }: { p: SolutionProjectInfo; usedBy: s
       </div>
       {p.references.length > 0 && <div className="tiny subtle"><span className="strong">Uses:</span> {p.references.join(', ')}</div>}
       {usedBy.length > 0 && <div className="tiny subtle"><span className="strong">Used by:</span> {usedBy.join(', ')}</div>}
-      {primary && <Button size="sm" variant="primary" icon="arrowRight" onClick={e => { e.stopPropagation(); navigate({ page: 'project', path: p.path }) }}>Open endpoints</Button>}
+      <div className="row gap-6" onClick={e => e.stopPropagation()}>
+        {primary && <Button size="sm" variant="primary" icon="arrowRight" onClick={() => navigate({ page: 'project', path: p.path })}>Open endpoints</Button>}
+        {p.isWeb && <RunButton path={p.path} />}
+        <BuildMenu path={p.path} size="sm" variant="ghost" />
+      </div>
     </div>
+  )
+}
+
+/** Starts or stops one project of the solution. */
+function RunButton({ path }: { path: string }) {
+  const toast = useToast()
+  const [running, setRunning] = useState<boolean | null>(null)
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    const tick = () => api.runStatus(path).then(s => { if (alive) { setRunning(s.running); setUrl(s.url) } }).catch(() => {})
+    tick(); const t = setInterval(tick, 3000)
+    return () => { alive = false; clearInterval(t) }
+  }, [path])
+  return (
+    <>
+      <Button size="sm" variant={running ? 'default' : 'success'} icon={running ? 'stop' : 'play'} onClick={async () => {
+        try { const s = running ? await api.stop(path) : await api.run(path); setRunning(s.running); setUrl(s.url) } catch (e) { toast.error(errorText(e)) }
+      }}>{running ? 'Stop' : 'Run'}</Button>
+      {running && url && <a className="btn ghost sm" href={url} target="_blank" rel="noreferrer"><Icon name="external" size={13} /></a>}
+    </>
   )
 }

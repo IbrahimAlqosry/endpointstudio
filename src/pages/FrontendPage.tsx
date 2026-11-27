@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { GitPanel } from '../components/GitPanel'
 import { FilesPanel } from '../components/FilesPanel'
+import { AgentPanel } from '../components/AgentPanel'
+import { PackagesPanel } from '../components/PackagesPanel'
+import { TestsPanel } from '../components/TestsPanel'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { DeployPanel } from '../components/DeployPanel'
 import { FolderPicker } from '../components/FolderPicker'
@@ -14,7 +17,7 @@ import { Alert, Button, Empty, MethodBadge, Modal, Spinner, errorText, useToast 
 import { href, navigate } from '../router'
 import type { ClientPlan, FrontendApiCall, FrontendDetails, RunStatus } from '../types'
 
-type Tab = 'calls' | 'pages' | 'components' | 'settings' | 'deploy' | 'git' | 'files' | 'terminal'
+type Tab = 'calls' | 'pages' | 'components' | 'settings' | 'deploy' | 'git' | 'files' | 'terminal' | 'packages' | 'tests' | 'agent'
 
 const MATCH: Record<FrontendApiCall['match'], { label: string; cls: string; hint: string }> = {
   matched: { label: 'Found in API', cls: 'success', hint: 'This call reaches an endpoint in the connected API.' },
@@ -168,7 +171,7 @@ export function FrontendPage({ path, onChanged }: { path: string; onChanged: () 
       </div>
 
       <div className="tabs" style={{ marginTop: 0, marginBottom: 18 }}>
-        {([['calls', 'send', 'API calls', app.apiCalls.length], ['pages', 'layers', 'Pages & routes', app.routes.length], ['components', 'box', 'Components', app.components.length], ['settings', 'key', 'Settings', null], ['deploy', 'rocket', 'Publish & deploy', null], ['git', 'history', 'Source control', null], ['files', 'folder', 'Files', null], ['terminal', 'monitor', 'Terminal', null]] as const).map(([id, icon, label, n]) => (
+        {([['calls', 'send', 'API calls', app.apiCalls.length], ['pages', 'layers', 'Pages & routes', app.routes.length], ['components', 'box', 'Components', app.components.length], ['settings', 'key', 'Settings', null], ['deploy', 'rocket', 'Publish & deploy', null], ['git', 'history', 'Source control', null], ['files', 'folder', 'Files', null], ['terminal', 'monitor', 'Terminal', null], ['packages', 'box', 'Packages', null], ['tests', 'checkCircle', 'Tests', null], ['agent', 'sparkles', 'AI agent', null]] as const).map(([id, icon, label, n]) => (
           <button key={id} className={`tab${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
             <span className="row gap-6"><Icon name={icon} size={15} />{label}{n != null && <span className="badge" style={{ height: 18 }}>{n}</span>}</span>
           </button>
@@ -181,6 +184,9 @@ export function FrontendPage({ path, onChanged }: { path: string; onChanged: () 
       {tab === 'settings' && <SettingsPanel path={path} onChanged={load} frontend />}
       {tab === 'git' && <GitPanel path={path} />}
       {tab === 'files' && <FilesPanel root={path} />}
+      {tab === 'packages' && <PackagesPanel path={path} />}
+      {tab === 'tests' && <TestsPanel path={path} npm />}
+      {tab === 'agent' && <AgentPanel root={path} />}
       {tab === 'terminal' && <TerminalPanel root={path} kind="frontend" scripts={Object.keys(app.scripts)} packageManager={app.packageManager} />}
       {tab === 'deploy' && <DeployPanel project={{ path: app.path, name: app.name, platform: 'Frontend', frontend: true }} />}
 

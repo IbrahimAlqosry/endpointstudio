@@ -32,6 +32,9 @@ builder.Services.AddSingleton<QosriStudio.Server.Services.Db.DbStudioService>();
 builder.Services.AddSingleton<GitService>();
 builder.Services.AddSingleton<ProjectFilesService>();
 builder.Services.AddSingleton<TerminalService>();
+builder.Services.AddSingleton<PackagesService>();
+builder.Services.AddSingleton<TestService>();
+builder.Services.AddSingleton<AgentService>();
 
 var app = builder.Build();
 
@@ -194,6 +197,20 @@ api.MapGet("/deploy/tools", (DeployService deploy) => deploy.ToolsAsync());
 api.MapGet("/project/deploy/profiles", (string path, DeployService deploy) => deploy.Profiles(path));
 api.MapPost("/project/deploy", (string path, DeployRequest req, DeployService deploy) => new { jobId = deploy.Start(path, req) });
 api.MapPost("/solution/build", (string path, DeployService deploy) => new { jobId = deploy.BuildSolution(path) });
+api.MapPost("/build", (string path, string? action, string? configuration, DeployService deploy) => new { jobId = deploy.BuildTarget(path, action ?? "build", configuration ?? "Debug") });
+
+// Everything that's running right now
+api.MapGet("/running", (DotnetService dotnet, FrontendService fe) =>
+    dotnet.RunningProjects().Select(p => new { path = p, name = Path.GetFileNameWithoutExtension(p), kind = "dotnet", status = dotnet.Status(p) })
+        .Concat(fe.RunningApps().Select(p => new { path = p, name = Path.GetFileName(Path.GetDirectoryName(p)) ?? p, kind = "frontend", status = fe.DevStatus(p) }))
+        .ToList());
+
+// AI agents
+api.MapGet("/agent/tools", () => AgentService.Tools());
+api.MapPost("/agent/run", (AgentRunBody b, AgentService a) => a.Start(b));
+api.MapGet("/agent/{id}", (string id, int? since, AgentService a) => a.Status(id, since ?? 0));
+api.MapPost("/agent/{id}/stop", (string id, AgentService a) => { a.Stop(id); return Results.Ok(); });
+api.MapPost("/agent/open-cursor", (CursorBody b) => { AgentService.OpenInCursor(b.Root, b.File, b.Line); return Results.Ok(); });
 api.MapGet("/jobs", (string owner, JobService jobs) => jobs.ForOwner(Path.GetFullPath(owner)));
 api.MapGet("/jobs/{id}", (string id, JobService jobs) => jobs.Get(id));
 api.MapPost("/jobs/{id}/cancel", (string id, JobService jobs) => { jobs.Cancel(id); return Results.Ok(); });
@@ -254,6 +271,17 @@ files.MapPost("/delete", (FileDeleteBody b, ProjectFilesService f) => new { mess
 files.MapGet("/search", (string root, string q, bool? content, ProjectFilesService f) => f.Search(root, q, content ?? true));
 files.MapGet("/history", (string root, HistoryService h) => h.GetEntries(root));
 files.MapPost("/undo", (PathBody b, HistoryService h) => new { message = "Undone: " + h.UndoLast(b.Path) });
+
+
+// ---------------------------------------------------------------- Packages & tests
+var pkgs = api.MapGroup("/packages");
+pkgs.MapGet("/", (string path, bool? updates, PackagesService p, CancellationToken ct) => p.ListAsync(path, updates ?? false, ct));
+pkgs.MapGet("/search", (string path, string q, PackagesService p, CancellationToken ct) => p.SearchAsync(path, q, ct));
+pkgs.MapGet("/versions", (string path, string id, PackagesService p, CancellationToken ct) => p.VersionsAsync(path, id, ct));
+pkgs.MapPost("/add", (PackageChangeBody b, PackagesService p) => new { jobId = p.Add(b) });
+pkgs.MapPost("/remove", (PackageChangeBody b, PackagesService p) => new { jobId = p.Remove(b) });
+api.MapPost("/tests/run", (TestRunBody b, TestService t) => new { jobId = t.Run(b) });
+api.MapGet("/tests/results/{id}", (string id, TestService t) => t.Results(id) is { } r ? Results.Ok(r) : Results.NoContent());
 
 // ---------------------------------------------------------------- Terminal
 var term = api.MapGroup("/terminal");
@@ -361,6 +389,7 @@ app.Lifetime.ApplicationStopping.Register(() =>
     app.Services.GetRequiredService<DotnetService>().Dispose();
     app.Services.GetRequiredService<FrontendService>().StopAll();
     app.Services.GetRequiredService<TerminalService>().CloseAll();
+    app.Services.GetRequiredService<AgentService>().StopAll();
 });
 
 app.Logger.LogInformation("QosriStudio server ready.");
@@ -386,6 +415,7 @@ static async Task<ProjectDetails> ToDetails(ProjectModel m, HistoryService histo
     m.Services,
     new DataAccessInfo(m.SqlProviders, m.ConnectionStrings));
 
+record CursorBody(string Root, string? File, int? Line);
 record ScriptBody(DbRef Ref, string Schema, string Table);
 record PathBody(string Path, int? Line = null);
 record SqlTextBody(string? Sql);
