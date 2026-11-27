@@ -4,7 +4,7 @@ using QosriStudio.Server.Models;
 namespace QosriStudio.Server.Services.Db;
 
 /// <summary>How each database spells names, paging and schema changes.</summary>
-public sealed class SqlDialect
+public sealed partial class SqlDialect
 {
     public DbProvider Provider { get; }
     private SqlDialect(DbProvider p) => Provider = p;
@@ -230,7 +230,7 @@ public sealed class SqlDialect
                 if (Provider is not (DbProvider.SqlServer or DbProvider.PostgreSql)) throw new StudioException("This database doesn't use schemas.");
                 return [$"CREATE SCHEMA {N(ch.NewName)}"];
             default:
-                throw new StudioException("That change isn't supported.");
+                return DdlMore(ch, schema);
         }
     }
 

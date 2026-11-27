@@ -68,7 +68,7 @@ public static class SchemaReader
         }
     }
 
-    private static async Task Each(DbConnection conn, string sql, Action<DbDataReader> row, CancellationToken ct, params (string, object)[] ps)
+    internal static async Task Each(DbConnection conn, string sql, Action<DbDataReader> row, CancellationToken ct, params (string, object)[] ps)
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
@@ -79,10 +79,10 @@ public static class SchemaReader
         while (await r.ReadAsync(ct)) row(r);
     }
 
-    private static string? Str(DbDataReader r, int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i));
+    internal static string? Str(DbDataReader r, int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i));
     private static int? Int(DbDataReader r, int i) => r.IsDBNull(i) ? null : (int)Math.Min(Convert.ToInt64(r.GetValue(i)), int.MaxValue);
-    private static long? Long(DbDataReader r, int i) => r.IsDBNull(i) ? null : Convert.ToInt64(r.GetValue(i));
-    private static bool Flag(DbDataReader r, int i) => !r.IsDBNull(i) && Convert.ToInt64(r.GetValue(i)) != 0;
+    internal static long? Long(DbDataReader r, int i) => r.IsDBNull(i) ? null : Convert.ToInt64(r.GetValue(i));
+    internal static bool Flag(DbDataReader r, int i) => !r.IsDBNull(i) && Convert.ToInt64(r.GetValue(i)) != 0;
 
     private static void AddFk(Raw raw, string name, string s, string t, string c, string rs, string rt, string rc, string del, string upd)
     {

@@ -39,7 +39,12 @@ public record DdlChange(
     List<string>? RefColumns = null,
     string? OnDelete = null,
     bool Unique = false,
-    string? Sql = null);
+    string? Sql = null,
+    List<string>? Privileges = null,
+    string? Principal = null,
+    string? Password = null,
+    bool WithData = false,
+    bool Enabled = true);
 public record DdlRequest(DbRef Ref, DdlChange Change);
 
 public record SqlRequest(DbRef Ref, string Sql, bool DryRun, bool Confirmed);
@@ -48,3 +53,19 @@ public record SqlResult(List<SqlResultSet> Results, long DurationMs, bool Rolled
 public record ExportRequest(DbRef Ref, string Schema, string Table, string Format, string? Search);
 public record DdlPreview(List<string> Statements, string? Warning);
 public record RoutineRequest(DbRef Ref, string Schema, string Name, string Kind);
+
+// ---------- Everything else a database holds ----------
+public record DbsTrigger(string Schema, string Table, string Name, string? Timing, string? Events, bool Enabled);
+public record DbsSequence(string Schema, string Name, string? Current, string? Increment);
+public record DbsConstraint(string Schema, string Table, string Name, string Kind, List<string> Columns, string? Definition);
+public record DbsPrincipal(string Name, string Kind, bool CanLogin);
+public record DbsGrant(string Grantee, string Privilege, string? Grantor);
+public record DbExtrasCaps(bool Triggers, bool Sequences, bool Users, bool Databases, bool Backup, bool CheckConstraints);
+public record DbExtras(List<DbsTrigger> Triggers, List<DbsSequence> Sequences, List<DbsConstraint> Constraints, List<DbsPrincipal> Principals, List<string> Notes, DbExtrasCaps Capabilities);
+public record RoutineParam(string Name, string Type, string Mode);
+public record RoutineDetails(string Definition, string Editable, List<RoutineParam> Parameters, string? Returns);
+public record ExecRoutineRequest(DbRef Ref, string Schema, string Name, string Kind, Dictionary<string, string?> Values);
+public record TableRefRequest(DbRef Ref, string Schema, string Table);
+public record TriggerRequest(DbRef Ref, string Schema, string Table, string Name);
+public record BackupRequest(DbRef Ref, string Folder);
+public record ScriptDbRequest(DbRef Ref, bool WithData);

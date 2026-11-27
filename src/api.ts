@@ -2,6 +2,7 @@ import type {
   AddEndpointRequest, BrowseResult, SystemInfo, BuildResult, ChangeResult, DbConnectionInfo, DbTable, GenerateProjectRequest,
   DeployProfile, DeployRequest, FrontendDetails, InspectResult, RunStatus as FeRunStatus, DeployTools, GenerateProjectResult, HealthReport, JobStatus, SettingChange, SettingsInfo, SqlTestRequest, SqlTestResult, ProjectDetails, SolutionDetails, UpgradePlan, UpgradeRequest, ProjectFileEntry, RecentProject, RunStatus, TryRequest, TryResponse, UpdateEndpointRequest,
   ClientPlan, GitBranch, GitCommit, GitCommitDetails, GitDiff, GitStash, GitStatus,
+  DbExtras, DbsGrant, RoutineDetails,
   DbRef, DbSchema, DdlChange, RowsResult, SavedConnection, SqlResult,
 } from './types'
 
@@ -112,6 +113,18 @@ export const api = {
   },
   dbsPreview: (ref: DbRef, change: DdlChange) => request<{ statements: string[]; warning: string | null }>('POST', '/api/dbs/ddl/preview', { ref, change }),
   dbsApply: (ref: DbRef, change: DdlChange) => request<{ statements: string[] }>('POST', '/api/dbs/ddl/apply', { ref, change }),
+  dbsExtras: (ref: DbRef) => request<DbExtras>('POST', '/api/dbs/extras', ref),
+  dbsRoutineDetails: (ref: DbRef, schema: string, name: string, kind: string) => request<RoutineDetails>('POST', '/api/dbs/routine/details', { ref, schema, name, kind }),
+  dbsRunRoutine: (ref: DbRef, schema: string, name: string, kind: string, values: Record<string, string | null>) => request<SqlResult>('POST', '/api/dbs/routine/run', { ref, schema, name, kind, values }),
+  dbsTrigger: (ref: DbRef, schema: string, table: string, name: string) => request<{ text: string }>('POST', '/api/dbs/trigger', { ref, schema, table, name }).then(r => r.text),
+  dbsGrants: (ref: DbRef, schema: string, table: string) => request<DbsGrant[]>('POST', '/api/dbs/grants', { ref, schema, table }),
+  dbsBackup: (ref: DbRef, folder: string) => request<{ message: string }>('POST', '/api/dbs/backup', { ref, folder }),
+  dbsScriptDb: async (ref: DbRef, withData: boolean) => {
+    const res = await fetch('/api/dbs/script-db', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref, withData }) })
+    if (!res.ok) { let m = 'Scripting failed.'; try { m = (await res.json()).error ?? m } catch { /* ignore */ } throw new ApiError(m) }
+    return { blob: await res.blob(), name: /filename="?([^";]+)/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'database.sql' }
+  },
+  dbsNewSqlite: (path: string) => request<{ path: string }>('POST', '/api/dbs/sqlite/new', { path }),
   dbsSql: (ref: DbRef, sql: string, dryRun: boolean, confirmed: boolean) => request<SqlResult>('POST', '/api/dbs/sql', { ref, sql, dryRun, confirmed }),
 
   // Source control

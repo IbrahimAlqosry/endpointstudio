@@ -5,11 +5,13 @@ import { Icon } from '../components/Icon'
 import { DataGrid } from '../components/db/DataGrid'
 import { ErDiagram, tableKey } from '../components/db/ErDiagram'
 import { SqlRunner } from '../components/db/SqlRunner'
+import { SqlEditor } from '../components/db/SqlEditor'
+import { CodeEditorDialog, PermissionsPanel, RoutinePanel, ServerPanel, TableExtras, TriggersPanel, ViewDefinition, template, type CodeKind } from '../components/db/DbObjects'
 import { ChangeDialog, CreateTableDialog, StructurePanel } from '../components/db/Structure'
 import { Alert, Button, Choice, Empty, Field, Modal, Spinner, Switch, errorText, timeAgo, useConfirm, useToast } from '../components/ui'
 import { href, navigate } from '../router'
 import { usePaletteItems, type PaletteItem } from '../palette'
-import type { DbConnectionInfo, DbProvider, DbRef, DbSchema, DdlChange, SavedConnection } from '../types'
+import type { DbConnectionInfo, DbExtras, DbProvider, DbRef, DbSchema, DdlChange, SavedConnection } from '../types'
 
 const PROVIDERS: { id: DbProvider; title: string; desc: string; port: number | null; user: string }[] = [
   { id: 'SqlServer', title: 'SQL Server', desc: 'SQL Server, LocalDB or Azure SQL', port: null, user: '' },
@@ -118,7 +120,7 @@ function ConnectionDialog({ existing, onClose, onSaved }: { existing: SavedConne
         </div>
         {isSqlite ? (
           <Field label="Database file">
-            <div className="row gap-6"><input className="input grow" value={conn.server} onChange={e => set({ server: e.target.value })} placeholder="C:\data\app.db" /><Button icon="folder" onClick={() => setFilePicker(true)}>Browse</Button></div>
+            <div className="row gap-6"><input className="input grow" value={conn.server} onChange={e => set({ server: e.target.value })} placeholder="C:\data\app.db" /><Button icon="folder" onClick={() => setFilePicker(true)}>Browse</Button><Button icon="plus" onClick={async () => { const p = window.prompt("Full path of the new database file, e.g. C:\data\app.db", conn.server || ""); if (!p) return; try { const r = await api.dbsNewSqlite(p); set({ server: r.path }); setOk("New empty database created.") } catch (e) { setError(errorText(e)) } }}>New file</Button></div>
           </Field>
         ) : (
           <>
@@ -152,7 +154,7 @@ function ConnectionDialog({ existing, onClose, onSaved }: { existing: SavedConne
 // ---------------------------------------------------------------- Studio
 
 type Selected = { kind: 'table' | 'view' | 'routine'; key: string } | null
-type Mode = 'diagram' | 'object' | 'sql'
+type Mode = 'diagram' | 'object' | 'sql' | 'server'
 
 function Studio({ id, database }: { id: string; database?: string }) {
   const toast = useToast()
@@ -165,7 +167,12 @@ function Studio({ id, database }: { id: string; database?: string }) {
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<Mode>('diagram')
   const [sel, setSel] = useState<Selected>(null)
-  const [objTab, setObjTab] = useState<'data' | 'structure' | 'script'>('data')
+  const [objTab, setObjTab] = useState<'data' | 'structure' | 'triggers' | 'access' | 'script'>('data')
+  const [extras, setExtras] = useState<DbExtras | null>(null)
+  const [codeNew, setCodeNew] = useState<CodeKind | null>(null)
+  const [newMenu, setNewMenu] = useState(false)
+  const [dbChange, setDbChange] = useState<{ change: DdlChange; title: string } | null>(null)
+  const [newDbName, setNewDbName] = useState<string | null>(null)
   const [jumpFilters, setJumpFilters] = useState<Record<string, string> | undefined>()
   const [filter, setFilter] = useState('')
   const [creating, setCreating] = useState(false)
@@ -190,7 +197,10 @@ function Studio({ id, database }: { id: string; database?: string }) {
 
   const loadSchema = useCallback(async () => {
     setLoading(true); setError(null)
-    try { setSchema(await api.dbsSchema(dbRef)) }
+    try {
+      setSchema(await api.dbsSchema(dbRef))
+      api.dbsExtras(dbRef).then(setExtras).catch(() => setExtras(null))
+    }
     catch (e) { setError(errorText(e)) } finally { setLoading(false) }
   }, [dbRef])
 
@@ -259,10 +269,21 @@ function Studio({ id, database }: { id: string; database?: string }) {
     return (
       <div className="page" style={{ maxWidth: 720 }}>
         <Crumbs name={conn.name} />
-        <h2 className="section-title">Choose a {isOracle ? 'schema' : 'database'}</h2>
+        <div className="row">
+          <h2 className="section-title grow">Choose a {isOracle ? 'schema' : 'database'}</h2>
+          {!isOracle && <Button size="sm" variant="primary" icon="plus" onClick={() => setNewDbName('')}>New database</Button>}
+        </div>
         <div className="choices mt-8">
           {databases.map(d => <Choice key={d} icon="database" title={d} onClick={() => navigate({ page: 'db', id, database: d })} />)}
         </div>
+        {newDbName !== null && (
+          <Modal title="New database" icon="database" size="narrow" onClose={() => setNewDbName(null)}
+            footer={<><Button onClick={() => setNewDbName(null)}>Cancel</Button><Button variant="primary" disabled={!newDbName.trim()} onClick={() => { const n = newDbName.trim(); setNewDbName(null); setDbChange({ change: { kind: 'createDatabase', newName: n }, title: `Create the database ${n}` }) }}>Continue</Button></>}>
+            <Field label="Name"><input className="input" autoFocus value={newDbName} onChange={e => setNewDbName(e.target.value.replace(/\s/g, '_'))} /></Field>
+          </Modal>
+        )}
+        {dbChange && <ChangeDialog dbRef={dbRef} change={dbChange.change} title={dbChange.title} onClose={() => setDbChange(null)}
+          onDone={() => { const n = dbChange.change.newName; setDbChange(null); if (n) navigate({ page: 'db', id, database: n }) }} />}
       </div>
     )
   }
@@ -288,7 +309,21 @@ function Studio({ id, database }: { id: string; database?: string }) {
         <div className="row wrap">
           {(database || databases) && <Button icon="repeat" onClick={() => navigate({ page: 'db', id })}>Switch {schema.provider === 'Oracle' ? 'schema' : 'database'}</Button>}
           <Button icon="refresh" loading={loading} onClick={loadSchema}>Refresh</Button>
-          <Button icon="eye" onClick={() => setViewDialog(true)}>New view</Button>
+          <div style={{ position: 'relative' }}>
+            <Button icon="plus" onClick={() => setNewMenu(o => !o)}>New…</Button>
+            {newMenu && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onClick={() => setNewMenu(false)} />
+                <div className="menu" style={{ right: 0, width: 240 }}>
+                  <button className="menu-item" onClick={() => { setNewMenu(false); setViewDialog(true) }}>View</button>
+                  {schema.capabilities.routines && <button className="menu-item" onClick={() => { setNewMenu(false); setCodeNew('procedure') }}>Procedure</button>}
+                  {schema.capabilities.routines && <button className="menu-item" onClick={() => { setNewMenu(false); setCodeNew('function') }}>Function</button>}
+                  {tables.length > 0 && <button className="menu-item" onClick={() => { setNewMenu(false); setCodeNew('trigger') }}>Trigger</button>}
+                  <button className="menu-item" onClick={() => { setNewMenu(false); setMode('server') }}>User, role, schema or sequence…</button>
+                </div>
+              </>
+            )}
+          </div>
           <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>New table</Button>
         </div>
       </div>
@@ -296,9 +331,10 @@ function Studio({ id, database }: { id: string; database?: string }) {
 
       <div className="dbs">
         <aside className="dbs-side card">
-          <div className="dbs-modes">
+          <div className="dbs-modes" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
             <button className={mode === 'diagram' ? 'active' : ''} onClick={() => setMode('diagram')}><Icon name="layers" size={15} />Diagram</button>
             <button className={mode === 'sql' ? 'active' : ''} onClick={() => setMode('sql')}><Icon name="code" size={15} />SQL</button>
+            <button className={mode === 'server' ? 'active' : ''} onClick={() => setMode('server')} title="Users, schemas, sequences, upkeep and backups"><Icon name="server" size={15} />Manage</button>
           </div>
           <div className="search" style={{ minWidth: 0, margin: '8px 10px' }}><Icon name="search" size={15} /><input className="input" placeholder="Find…" value={filter} onChange={e => setFilter(e.target.value)} /></div>
           <div className="dbs-list">
@@ -320,18 +356,25 @@ function Studio({ id, database }: { id: string; database?: string }) {
               : <ErDiagram schema={schema} storageKey={storageKey + ':layout'} selected={sel?.kind === 'table' ? sel.key : null}
                   onSelect={k => setSel(k ? { kind: 'table', key: k } : null)} onOpen={k => openTable(k)} />
           )}
+          {mode === 'server' && <ServerPanel dbRef={dbRef} schema={schema} extras={extras} onChanged={loadSchema} />}
           {mode === 'sql' && <div className="card pad"><SqlRunner dbRef={dbRef} schema={schema} storageKey={storageKey} initial={sqlSeed} onChanged={loadSchema} /></div>}
           {mode === 'object' && selTable && (
             <div className="card pad col gap-14">
               <ObjectHeader icon="table" title={selTable.name} sub={`${schema.capabilities.schemas ? selTable.schema + ' · ' : ''}${selTable.columns.length} columns${selTable.rows != null ? ` · about ${selTable.rows.toLocaleString()} rows` : ''}`}
                 onSql={() => { setSqlSeed(`SELECT * FROM ${selTable.schema && schema.capabilities.schemas ? selTable.schema + '.' : ''}${selTable.name}`); setMode('sql') }} />
               <div className="tabs" style={{ marginTop: 0 }}>
-                {([['data', 'list', 'Data'], ['structure', 'edit', 'Design'], ['script', 'fileText', 'Script']] as const).map(([t, icon, label]) => (
-                  <button key={t} className={`tab${objTab === t ? ' active' : ''}`} onClick={() => setObjTab(t)}><span className="row gap-6"><Icon name={icon} size={14} />{label}</span></button>
-                ))}
+                {([['data', 'list', 'Data'], ['structure', 'edit', 'Design'], ['triggers', 'zap', 'Triggers'], ['access', 'lock', 'Permissions'], ['script', 'fileText', 'Script']] as const).map(([t, icon, label]) => {
+                  const n = t === 'triggers' ? extras?.triggers.filter(x => x.table === selTable.name && x.schema === selTable.schema).length : undefined
+                  return <button key={t} className={`tab${objTab === t ? ' active' : ''}`} onClick={() => setObjTab(t)}><span className="row gap-6"><Icon name={icon} size={14} />{label}{n ? <span className="badge" style={{ height: 18 }}>{n}</span> : null}</span></button>
+                })}
               </div>
               {objTab === 'data' && <DataGrid key={sel!.key + JSON.stringify(jumpFilters ?? {})} dbRef={dbRef} schema={schema} table={selTable} initialFilters={jumpFilters} onOpenTable={openTable} onChanged={loadSchema} />}
-              {objTab === 'structure' && <StructurePanel dbRef={dbRef} schema={schema} table={selTable} onChanged={loadSchema} onOpenTable={k => { loadSchema(); setSel({ kind: 'table', key: k }) }} onDropped={afterDrop} />}
+              {objTab === 'structure' && <>
+                <StructurePanel dbRef={dbRef} schema={schema} table={selTable} onChanged={loadSchema} onOpenTable={k => { loadSchema(); setSel({ kind: 'table', key: k }) }} onDropped={afterDrop} />
+                <TableExtras dbRef={dbRef} schema={schema} extras={extras} table={selTable} onChanged={loadSchema} onOpenTable={k => { loadSchema().then(() => { setSel({ kind: 'table', key: k }); setObjTab('data') }) }} />
+              </>}
+              {objTab === 'triggers' && <TriggersPanel dbRef={dbRef} schema={schema} extras={extras} table={selTable} onChanged={loadSchema} />}
+              {objTab === 'access' && <PermissionsPanel dbRef={dbRef} schema={schema} extras={extras} table={selTable} />}
               {objTab === 'script' && <ScriptView load={() => api.dbsScript(dbRef, selTable.schema, selTable.name)} name={selTable.name} />}
             </div>
           )}
@@ -339,17 +382,18 @@ function Studio({ id, database }: { id: string; database?: string }) {
             <div className="card pad col gap-14">
               <ObjectHeader icon="eye" title={selView.name} sub="View: a saved query that works like a read-only table" onDrop={() => setChange({ change: { kind: 'dropView', schema: selView.schema, table: selView.name }, title: `Delete the view ${selView.name}?`, after: afterDrop })} />
               <div className="tabs" style={{ marginTop: 0 }}>
-                {([['data', 'Data'], ['script', 'Definition']] as const).map(([t, label]) => <button key={t} className={`tab${objTab === t || (t === 'data' && objTab === 'structure') ? ' active' : ''}`} onClick={() => setObjTab(t)}>{label}</button>)}
+                {([['data', 'Data'], ['script', 'Definition'], ['access', 'Permissions']] as const).map(([t, label]) => <button key={t} className={`tab${objTab === t || (t === 'data' && (objTab === 'structure' || objTab === 'triggers')) ? ' active' : ''}`} onClick={() => setObjTab(t)}>{label}</button>)}
               </div>
-              {objTab !== 'script' && <DataGrid key={sel!.key} dbRef={dbRef} schema={schema} readOnly initialFilters={jumpFilters} onOpenTable={openTable} onChanged={() => {}}
+              {objTab !== 'script' && objTab !== 'access' && <DataGrid key={sel!.key} dbRef={dbRef} schema={schema} readOnly initialFilters={jumpFilters} onOpenTable={openTable} onChanged={() => {}}
                 table={{ schema: selView.schema, name: selView.name, rows: null, columns: [], primaryKey: [], pkName: null }} />}
-              {objTab === 'script' && <pre className="log" style={{ whiteSpace: 'pre-wrap', maxHeight: 520 }}>{selView.definition ?? 'The definition isn’t available.'}</pre>}
+              {objTab === 'script' && <ViewDefinition dbRef={dbRef} schema={schema} view={selView} onChanged={loadSchema} onRenamed={n => loadSchema().then(() => setSel({ kind: 'view', key: tableKey({ schema: selView.schema, name: n }) }))} />}
+              {objTab === 'access' && <PermissionsPanel dbRef={dbRef} schema={schema} extras={extras} table={selView} />}
             </div>
           )}
           {mode === 'object' && selRoutine && (
             <div className="card pad col gap-14">
               <ObjectHeader icon="zap" title={selRoutine.name} sub={selRoutine.kind} onDrop={selRoutine.kind !== 'Package' ? () => setChange({ change: { kind: 'dropRoutine', schema: selRoutine.schema, table: selRoutine.name, oldName: selRoutine.kind }, title: `Delete ${selRoutine.name}?`, after: afterDrop }) : undefined} />
-              <ScriptView key={sel!.key} load={() => api.dbsRoutine(dbRef, selRoutine.schema, selRoutine.name, selRoutine.kind)} name={selRoutine.name} />
+              <RoutinePanel key={sel!.key} dbRef={dbRef} schema={schema} routine={selRoutine} onChanged={loadSchema} />
             </div>
           )}
         </section>
@@ -358,6 +402,8 @@ function Studio({ id, database }: { id: string; database?: string }) {
       {creating && <CreateTableDialog dbRef={dbRef} schema={schema} onClose={() => setCreating(false)} onDone={async key => { setCreating(false); await loadSchema(); setSel({ kind: 'table', key }); setMode('object'); setObjTab('structure'); toast.success('Table created.') }} />}
       {viewDialog && <ViewDialog schema={schema} onClose={() => setViewDialog(false)} onSubmit={c => { setViewDialog(false); setChange({ change: c, title: `Create the view ${c.newName}`, after: () => { loadSchema().then(() => { setSel({ kind: 'view', key: tableKey({ schema: c.schema ?? '', name: c.newName! }) }); setMode('object') }) } }) }} />}
       {change && <ChangeDialog dbRef={dbRef} change={change.change} title={change.title} onClose={() => setChange(null)} onDone={() => { const a = change.after; setChange(null); if (a) a(); else loadSchema() }} />}
+      {codeNew && <CodeEditorDialog dbRef={dbRef} schema={schema} title={`New ${codeNew}`} initial={template(schema, codeNew, codeNew === 'trigger' ? selTable ?? tables[0] : undefined)}
+        onClose={() => setCodeNew(null)} onDone={() => { setCodeNew(null); loadSchema() }} />}
     </div>
   )
 }
@@ -445,7 +491,7 @@ function ViewDialog({ schema, onClose, onSubmit }: { schema: DbSchema; onClose: 
           <Field label="Name"><input className="input" autoFocus value={name} onChange={e => setName(e.target.value.replace(/\s/g, '_'))} /></Field>
           {schema.capabilities.schemas && <Field label="Schema"><select className="select" value={sch} onChange={e => setSch(e.target.value)}>{schema.schemas.map(s => <option key={s}>{s}</option>)}</select></Field>}
         </div>
-        <Field label="Query"><textarea className="textarea code" rows={8} value={sql} onChange={e => setSql(e.target.value)} spellCheck={false} /></Field>
+        <Field label="Query"><SqlEditor value={sql} onChange={setSql} schema={schema} rows={8} /></Field>
       </div>
     </Modal>
   )

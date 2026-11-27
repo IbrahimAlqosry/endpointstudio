@@ -164,14 +164,41 @@ public partial class DbStudioService(DatabaseService db)
 
     public Task<DdlPreview> PreviewAsync(DdlRequest req, CancellationToken ct) => Guard(async () =>
     {
-        var (conn, info) = await OpenAsync(req.Ref, ct);
+        var (conn, info) = await OpenForChangeAsync(req, ct, write: false);
         await using (conn)
         {
-            var s = await SchemaReader.ReadAsync(conn, info, ct);
+            var s = SqlDialect.IsServerLevel(req.Change.Kind) ? null : await SchemaReader.ReadAsync(conn, info, ct);
             var statements = SqlDialect.For(info.Provider).Ddl(req.Change, s);
-            return new DdlPreview(statements, Warning(req.Change, s));
+            // Never show a password that's being set
+            if (req.Change.Password is { Length: > 0 } pw)
+                statements = statements.Select(x => x.Replace(pw.Replace("'", "''"), "••••••").Replace(pw, "••••••")).ToList();
+            return new DdlPreview(statements, s is null ? MoreWarning(req.Change) : Warning(req.Change, s) ?? MoreWarning(req.Change));
         }
     });
+
+    /// <summary>Server-wide changes (create/drop a database) connect to the server's own database instead of the one being changed.</summary>
+    private async Task<(DbConnection Conn, DbConnectionInfo Info)> OpenForChangeAsync(DdlRequest req, CancellationToken ct, bool write)
+    {
+        if (!SqlDialect.IsServerLevel(req.Change.Kind)) return await OpenAsync(req.Ref, ct, write);
+        var info = Resolve(req.Ref);
+        info = info with { Database = info.Provider switch { DbProvider.SqlServer => "master", DbProvider.PostgreSql => "postgres", _ => null } };
+        return (await db.OpenAsync(info, ct, write), info);
+    }
+
+    private static string? MoreWarning(DdlChange ch) => ch.Kind switch
+    {
+        "dropDatabase" => $"This deletes the whole database {ch.OldName}: every table, row, view and procedure, for good. Anyone connected is disconnected.",
+        "dropSchema" => "The schema must be empty. Move or delete its tables first.",
+        "dropUser" => "The user can no longer sign in. Objects they own may need a new owner first.",
+        "dropTrigger" => "The automatic action stops for good.",
+        "dropSequence" => "Anything that takes numbers from this sequence will fail.",
+        "dropConstraint" => "Values are no longer checked by this rule.",
+        "restartSequence" => "New numbers start from this value. If it's lower than numbers already used, inserts may collide.",
+        "maintenance" => "This can take a while on large tables and may slow the database down while it runs.",
+        "copyTable" => ch.WithData ? "The copy gets the same columns, key and data, but not the relations or indexes." : "The copy gets the same columns and key, but no data, relations or indexes.",
+        "revoke" => "People using this sign-in may lose access right away.",
+        _ => null,
+    };
 
     private static string? Warning(DdlChange ch, DbSchema s)
     {
@@ -192,13 +219,20 @@ public partial class DbStudioService(DatabaseService db)
 
     public Task<object> ApplyDdlAsync(DdlRequest req, CancellationToken ct) => Guard<object>(async () =>
     {
-        var (conn, info) = await OpenAsync(req.Ref, ct, write: true);
+        var (conn, info) = await OpenForChangeAsync(req, ct, write: true);
         await using (conn)
         {
-            var s = await SchemaReader.ReadAsync(conn, info, ct);
+            var s = SqlDialect.IsServerLevel(req.Change.Kind) ? null : await SchemaReader.ReadAsync(conn, info, ct);
             var statements = SqlDialect.For(info.Provider).Ddl(req.Change, s);
             // SQL Server, PostgreSQL and SQLite can undo schema changes when one step fails; MySQL and Oracle commit each one.
-            var transactional = info.Provider is DbProvider.SqlServer or DbProvider.PostgreSql or DbProvider.Sqlite;
+            var transactional = info.Provider is DbProvider.SqlServer or DbProvider.PostgreSql or DbProvider.Sqlite && !SqlDialect.NeedsNoTransaction(req.Change.Kind);
+            if (req.Change.Kind == "dropDatabase")
+            {
+                // Pooled connections to that database would keep it in use
+                Microsoft.Data.SqlClient.SqlConnection.ClearAllPools();
+                Npgsql.NpgsqlConnection.ClearAllPools();
+                MySqlConnector.MySqlConnection.ClearAllPools();
+            }
             await using var tx = transactional ? await conn.BeginTransactionAsync(ct) : null;
             foreach (var sql in statements)
             {
@@ -209,6 +243,8 @@ public partial class DbStudioService(DatabaseService db)
                 await cmd.ExecuteNonQueryAsync(ct);
             }
             if (tx is not null) await tx.CommitAsync(ct);
+            if (req.Change.Password is { Length: > 0 } pw)
+                statements = statements.Select(x => x.Replace(pw.Replace("'", "''"), "••••••").Replace(pw, "••••••")).ToList();
             return new { statements };
         }
     });
@@ -599,6 +635,9 @@ public partial class DbStudioService(DatabaseService db)
     [GeneratedRegex(@"^\s*(CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE)\b", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex DdlRx();
 
+    [GeneratedRegex(@"^\s*((CREATE|ALTER|DROP)\s+(DATABASE|LOGIN)|BACKUP|RESTORE|VACUUM|DBCC|CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY|REINDEX\s+DATABASE)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex NoTransactionRx();
+
     public Task<SqlResult> RunSqlAsync(SqlRequest req, CancellationToken ct) => Guard(async () =>
     {
         var sqlText = req.Sql ?? "";
@@ -615,9 +654,12 @@ public partial class DbStudioService(DatabaseService db)
         {
             if (req.DryRun && info.Provider is DbProvider.MySql or DbProvider.Oracle && statements.Any(s => DdlRx().IsMatch(Strip(s))))
                 throw new StudioException($"{info.Provider} saves design changes immediately, so they can't be tried out safely. Remove them or run for real.");
+            // Some statements refuse to run inside a transaction (databases, backups, VACUUM, logins)
+            var noTx = statements.Any(s => NoTransactionRx().IsMatch(Strip(s)));
+            if (noTx && req.DryRun) throw new StudioException("Statements that create, back up or clean up whole databases can't be tried out. Run them for real.");
             var sw = Stopwatch.StartNew();
             var results = new List<SqlResultSet>();
-            await using var tx = await conn.BeginTransactionAsync(ct);
+            await using var tx = noTx ? null : await conn.BeginTransactionAsync(ct);
             try
             {
                 foreach (var statement in statements)
@@ -646,13 +688,16 @@ public partial class DbStudioService(DatabaseService db)
                     await r.CloseAsync();
                     if (!any) results.Add(new SqlResultSet([], [], false, r.RecordsAffected, Shorten(Strip(statement))));
                 }
-                if (req.DryRun) await tx.RollbackAsync(ct);
-                else await tx.CommitAsync(ct);
+                if (tx is not null)
+                {
+                    if (req.DryRun) await tx.RollbackAsync(ct);
+                    else await tx.CommitAsync(ct);
+                }
             }
             catch (DbException ex)
             {
-                try { await tx.RollbackAsync(CancellationToken.None); } catch { /* already gone */ }
-                var done = results.Count > 0 && !(info.Provider is DbProvider.SqlServer or DbProvider.PostgreSql or DbProvider.Sqlite) ? " Statements before it may already be saved." : " Nothing was saved.";
+                try { if (tx is not null) await tx.RollbackAsync(CancellationToken.None); } catch { /* already gone */ }
+                var done = results.Count > 0 && (tx is null || !(info.Provider is DbProvider.SqlServer or DbProvider.PostgreSql or DbProvider.Sqlite)) ? " Statements before it may already be saved." : " Nothing was saved.";
                 throw new StudioException(Friendly(ex) + done);
             }
             return new SqlResult(results, sw.ElapsedMilliseconds, req.DryRun);

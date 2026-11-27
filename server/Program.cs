@@ -291,6 +291,18 @@ dbs.MapPost("/rows/export", async (ExportRequest req, DbStudioService s, Cancell
 });
 dbs.MapPost("/ddl/preview", (DdlRequest req, DbStudioService s, CancellationToken ct) => s.PreviewAsync(req, ct));
 dbs.MapPost("/ddl/apply", (DdlRequest req, DbStudioService s, CancellationToken ct) => s.ApplyDdlAsync(req, ct));
+dbs.MapPost("/extras", (DbRef r, DbStudioService s, CancellationToken ct) => s.ExtrasAsync(r, ct));
+dbs.MapPost("/routine/details", (RoutineRequest req, DbStudioService s, CancellationToken ct) => s.RoutineDetailsAsync(req, ct));
+dbs.MapPost("/routine/run", (ExecRoutineRequest req, DbStudioService s, CancellationToken ct) => s.ExecuteRoutineAsync(req, ct));
+dbs.MapPost("/trigger", async (TriggerRequest req, DbStudioService s, CancellationToken ct) => new { text = await s.TriggerAsync(req, ct) });
+dbs.MapPost("/grants", (TableRefRequest req, DbStudioService s, CancellationToken ct) => s.GrantsAsync(req, ct));
+dbs.MapPost("/backup", async (BackupRequest req, DbStudioService s, CancellationToken ct) => new { message = await s.BackupAsync(req, ct) });
+dbs.MapPost("/script-db", async (ScriptDbRequest req, DbStudioService s, CancellationToken ct) =>
+{
+    var (content, name) = await s.ScriptDatabaseAsync(req, ct);
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(content), "text/plain; charset=utf-8", name);
+});
+dbs.MapPost("/sqlite/new", (PathBody b) => new { path = DbStudioService.CreateSqliteFile(b.Path) });
 dbs.MapPost("/sql", (SqlRequest req, DbStudioService s, CancellationToken ct) => s.RunSqlAsync(req, ct));
 
 // ---------------------------------------------------------------- Database

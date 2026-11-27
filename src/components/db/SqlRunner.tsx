@@ -3,6 +3,7 @@ import { api } from '../../api'
 import type { DbRef, DbSchema, SqlResult } from '../../types'
 import { Icon } from '../Icon'
 import { Alert, Button, errorText, useConfirm } from '../ui'
+import { SqlEditor } from './SqlEditor'
 
 export function SqlRunner({ dbRef, schema, storageKey, initial, onChanged }: { dbRef: DbRef; schema: DbSchema; storageKey: string; initial?: string; onChanged: () => void }) {
   const confirm = useConfirm()
@@ -52,6 +53,10 @@ export function SqlRunner({ dbRef, schema, storageKey, initial, onChanged }: { d
         <span className="small subtle">Start from:</span>
         {snippets.map(([label, text]) => <button key={label} className="chip" onClick={() => setSql(text)}>{label}</button>)}
         <div className="grow" />
+        <label className="btn ghost sm" style={{ cursor: 'pointer' }}>
+          <Icon name="fileText" size={14} />Open .sql file
+          <input type="file" accept=".sql,.txt" style={{ display: 'none' }} onChange={async e => { const f = e.target.files?.[0]; if (f) setSql(await f.text()); e.target.value = '' }} />
+        </label>
         {history.length > 0 && <Button size="sm" variant="ghost" icon="history" onClick={() => setShowHistory(s => !s)}>Recent ({history.length})</Button>}
       </div>
       {showHistory && (
@@ -61,12 +66,8 @@ export function SqlRunner({ dbRef, schema, storageKey, initial, onChanged }: { d
           ))}
         </div>
       )}
-      <textarea className="textarea code sql-editor" spellCheck={false} value={sql} onChange={e => setSql(e.target.value)} rows={9}
-        placeholder="Write a query, e.g. SELECT * FROM Customers WHERE City = 'Cairo'"
-        onKeyDown={e => {
-          if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(false) }
-          if (e.key === 'Tab') { e.preventDefault(); const t = e.currentTarget, s = t.selectionStart; setSql(sql.slice(0, s) + '  ' + sql.slice(t.selectionEnd)); setTimeout(() => t.setSelectionRange(s + 2, s + 2)) }
-        }} />
+      <SqlEditor value={sql} onChange={setSql} schema={schema} onRun={() => run(false)}
+        placeholder="Write a query, e.g. SELECT * FROM Customers WHERE City = 'Cairo'. Suggestions appear as you type (Ctrl+Space shows them)." />
       <div className="row wrap gap-6">
         <Button variant="primary" icon="play" loading={busy} disabled={!sql.trim()} onClick={() => run(false)}>Run</Button>
         <Button icon="eye" disabled={busy || !sql.trim()} onClick={() => run(true)} title="Runs everything, shows the results, then undoes all changes">Try without saving</Button>

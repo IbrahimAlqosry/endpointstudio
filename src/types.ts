@@ -221,6 +221,7 @@ export interface DbsColumnDef { name: string; type: string; nullable: boolean; d
 export interface DdlChange {
   kind: string; schema?: string | null; table?: string | null; column?: DbsColumnDef | null; columns?: DbsColumnDef[] | null; oldName?: string | null; newName?: string | null
   constraintName?: string | null; keyColumns?: string[] | null; refSchema?: string | null; refTable?: string | null; refColumns?: string[] | null; onDelete?: string | null; unique?: boolean; sql?: string | null
+  privileges?: string[] | null; principal?: string | null; password?: string | null; withData?: boolean; enabled?: boolean
 }
 export interface SqlResultSet { columns: string[]; rows: (string | null)[][]; truncated: boolean; affected: number | null; message: string | null }
 export interface SqlResult { results: SqlResultSet[]; durationMs: number; rolledBack: boolean; needsConfirm: string | null }
@@ -241,3 +242,16 @@ export interface GitDiff { file: string; text: string; binary: boolean; tooLarge
 
 // ---------- Typed API client ----------
 export interface ClientPlan { folder: string; style: string; operations: number; types: number; files: { path: string; exists: boolean; kept: boolean }[]; usage: string }
+
+// ---------- Database Studio: everything else ----------
+export interface DbsTrigger { schema: string; table: string; name: string; timing: string | null; events: string | null; enabled: boolean }
+export interface DbsSequence { schema: string; name: string; current: string | null; increment: string | null }
+export interface DbsConstraint { schema: string; table: string; name: string; kind: 'unique' | 'check'; columns: string[]; definition: string | null }
+export interface DbsPrincipal { name: string; kind: 'user' | 'role'; canLogin: boolean }
+export interface DbsGrant { grantee: string; privilege: string; grantor: string | null }
+export interface DbExtras {
+  triggers: DbsTrigger[]; sequences: DbsSequence[]; constraints: DbsConstraint[]; principals: DbsPrincipal[]; notes: string[]
+  capabilities: { triggers: boolean; sequences: boolean; users: boolean; databases: boolean; backup: boolean; checkConstraints: boolean }
+}
+export interface RoutineParam { name: string; type: string; mode: string }
+export interface RoutineDetails { definition: string; editable: string; parameters: RoutineParam[]; returns: string | null }
